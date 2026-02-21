@@ -17,6 +17,14 @@ uniform float uTurboAmp;
 uniform float uRoughness;
 uniform float uAttenuation;
 uniform float uTurbulence;
+uniform float uBaseWeight;
+uniform float uTurboWeight;
+uniform float uContourFreq;
+uniform float uContourStrength;
+uniform float uContourPower;
+uniform float uDetailScale;
+uniform float uDetailStrength;
+uniform float uElevation;
 
 uniform float uLow;
 uniform float uMid;
@@ -155,7 +163,10 @@ float alligatorTurbulence(vec3 p) {
 
 float edgePin(vec2 uv) {
   float border = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-  return smoothstep(0.0, max(0.0005, uEdgeFade), border);
+  float inset = max(0.002, uEdgeFade * 0.62);
+  float feather = max(0.0005, uEdgeFade * 0.92);
+  float pin = smoothstep(inset, inset + feather, border);
+  return pin * pin;
 }
 
 void main() {
@@ -172,24 +183,24 @@ void main() {
   float baseSigned = base * 2.0 - 1.0;
   float turboSigned = turbo * 2.0 - 1.0;
 
-  float structure = baseSigned * 0.68 + turboSigned * 0.92;
-  float contourFreq = mix(10.0, 28.0, clamp(uRoughness + uMid * 0.3, 0.0, 1.0));
+  float structure = baseSigned * uBaseWeight + turboSigned * uTurboWeight;
+  float contourFreq = max(0.1, uContourFreq) * (1.0 + uMid * 0.25);
   float contour = sin((structure + turbo * 0.65) * contourFreq);
-  float contourShape = sign(contour) * pow(abs(contour), 1.8);
-  float shaped = mix(structure, structure + contourShape * 0.38, 0.72);
+  float contourShape = sign(contour) * pow(abs(contour), max(0.05, uContourPower));
+  float shaped = mix(structure, structure + contourShape * uContourStrength, 0.72);
 
   float macroAudio = 1.0 + (uLow * uLowGain + uMid * uMidGain) * uGlobalGain;
   float fine = snoise(
-    warpedDomain * 3.35 +
+    warpedDomain * max(0.1, uDetailScale) +
     vec3(0.0, 0.0, uTime * (uDriftSpeed * 1.9 + 0.03))
   );
-  float audioShape = shaped * macroAudio + fine * uHigh * uHighGain * uGlobalGain * 0.45;
+  float audioShape = shaped * macroAudio + fine * uHigh * uHighGain * uGlobalGain * uDetailStrength;
 
   float distToMouse = distance(vUv, uMouseUv);
   float mouseFalloff = 1.0 - smoothstep(0.0, max(0.0001, uMouseRadius), distToMouse);
   float mouseTerm = mouseFalloff * uMouseStrength;
 
-  float height = edgePin(vUv) * ((audioShape * uFinalAmp) + mouseTerm);
+  float height = edgePin(vUv) * ((audioShape * uFinalAmp) + mouseTerm + uElevation);
   vHeight = height;
 
   vec3 displaced = position;

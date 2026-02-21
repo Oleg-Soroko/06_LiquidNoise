@@ -4,14 +4,27 @@ import { AudioInputController } from "./audio/AudioInputController";
 import { BandAnalyzer } from "./audio/BandAnalyzer";
 import { createControlPanel, type ControlPanelApi } from "./ui/controls";
 import {
+  CUSTOM_MATCAP_ID,
   DEFAULT_AUDIO_MAP_PARAMS,
+  DEFAULT_FOG_PARAMS,
+  DEFAULT_HDRI_PARAMS,
   DEFAULT_INTERACTION_PARAMS,
+  DEFAULT_LIQUID_METAL_PARAMS,
+  DEFAULT_MATERIAL_MODE,
+  DEFAULT_MATCAP_ID,
   DEFAULT_NOISE_PARAMS,
+  DEFAULT_POST_FX_PARAMS,
   DEFAULT_QUALITY_PARAMS,
   DisplacedPlaneScene,
+  MATCAP_OPTIONS,
   type AudioMapParams,
+  type FogParams,
+  type HdriParams,
   type HoudiniNoiseParams,
   type InteractionParams,
+  type LiquidMetalParams,
+  type MaterialMode,
+  type PostFxParams,
   type QualityParams,
 } from "./visual/DisplacedPlaneScene";
 
@@ -45,6 +58,12 @@ const noiseParams: HoudiniNoiseParams = { ...DEFAULT_NOISE_PARAMS };
 const audioMapParams: AudioMapParams = { ...DEFAULT_AUDIO_MAP_PARAMS };
 const interactionParams: InteractionParams = { ...DEFAULT_INTERACTION_PARAMS };
 const qualityParams: QualityParams = { ...DEFAULT_QUALITY_PARAMS };
+const fogParams: FogParams = { ...DEFAULT_FOG_PARAMS };
+const liquidParams: LiquidMetalParams = { ...DEFAULT_LIQUID_METAL_PARAMS };
+const hdriParams: HdriParams = { ...DEFAULT_HDRI_PARAMS };
+const postFxParams: PostFxParams = { ...DEFAULT_POST_FX_PARAMS };
+let selectedMatcapId = DEFAULT_MATCAP_ID;
+let materialMode: MaterialMode = DEFAULT_MATERIAL_MODE;
 
 const audioElement = new Audio();
 audioElement.preload = "auto";
@@ -60,6 +79,11 @@ const scene = new DisplacedPlaneScene({
   audioMapParams,
   interactionParams,
   qualityParams,
+  fogParams,
+  liquidMetalParams: liquidParams,
+  hdriParams,
+  postFxParams,
+  materialMode,
 });
 
 let controlPanel: ControlPanelApi;
@@ -70,6 +94,13 @@ controlPanel = createControlPanel(
     audioMapParams,
     interactionParams,
     qualityParams,
+    fogParams,
+    liquidParams,
+    hdriParams,
+    postFxParams,
+    matcapOptions: MATCAP_OPTIONS,
+    selectedMatcapId,
+    materialMode,
   },
   {
     onFileSelected: async (file: File): Promise<void> => {
@@ -123,6 +154,47 @@ controlPanel = createControlPanel(
       }
     },
 
+    onMatcapPresetSelect: async (id: string): Promise<void> => {
+      try {
+        controlPanel.setStatus(`Switching matcap to ${id}...`);
+        await scene.setMatcapPreset(id);
+        selectedMatcapId = scene.getActiveMatcapId();
+        controlPanel.setMatcapSelection(selectedMatcapId);
+        controlPanel.setStatus(`Matcap preset: ${id}`);
+      } catch (error) {
+        controlPanel.setStatus(`Matcap load failed: ${formatError(error)}`, "error");
+      }
+    },
+
+    onMatcapFileSelected: async (file: File): Promise<void> => {
+      try {
+        controlPanel.setStatus(`Loading custom matcap: ${file.name}...`);
+        await scene.setCustomMatcap(file);
+        selectedMatcapId = CUSTOM_MATCAP_ID;
+        controlPanel.setMatcapSelection(selectedMatcapId);
+        controlPanel.setStatus(`Custom matcap loaded: ${file.name}`);
+      } catch (error) {
+        controlPanel.setStatus(`Custom matcap failed: ${formatError(error)}`, "error");
+      }
+    },
+
+    onMaterialModeChange: (mode: MaterialMode): void => {
+      materialMode = mode;
+      scene.setMaterialMode(mode);
+      controlPanel.setMaterialMode(mode);
+      controlPanel.setStatus(mode === "liquid" ? "Material mode: Liquid Metal." : "Material mode: Matcap.");
+    },
+
+    onHdriFileSelected: async (file: File): Promise<void> => {
+      try {
+        controlPanel.setStatus(`Loading HDRI: ${file.name}...`);
+        await scene.loadHdriFile(file);
+        controlPanel.setStatus(`HDRI loaded: ${file.name}. Enable HDRI Lighting in the HDRI panel.`);
+      } catch (error) {
+        controlPanel.setStatus(`HDRI load failed: ${formatError(error)}`, "error");
+      }
+    },
+
     onNoiseParamChange: (key, value): void => {
       noiseParams[key] = value;
       scene.setNoiseParam(key, value);
@@ -143,12 +215,34 @@ controlPanel = createControlPanel(
       qualityParams[key] = value;
       scene.setQualityParam(key, value);
     },
+
+    onFogParamChange: (key, value): void => {
+      fogParams[key] = value;
+      scene.setFogParam(key, value);
+    },
+
+    onLiquidParamChange: (key, value): void => {
+      liquidParams[key] = value;
+      scene.setLiquidParam(key, value);
+    },
+
+    onHdriParamChange: (key, value): void => {
+      hdriParams[key] = value;
+      scene.setHdriParam(key, value);
+    },
+
+    onPostFxParamChange: (key, value): void => {
+      postFxParams[key] = value;
+      scene.setPostFxParam(key, value);
+    },
   },
 );
 
 controlPanel.setMicActive(false);
 controlPanel.setPlayState(false);
 controlPanel.setPlayEnabled(false);
+controlPanel.setMatcapSelection(selectedMatcapId);
+controlPanel.setMaterialMode(materialMode);
 
 const clock = new Clock();
 let animationFrameId = 0;
