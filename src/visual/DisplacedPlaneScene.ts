@@ -18,6 +18,8 @@ export interface HoudiniNoiseParams {
   roughness: number;
   attenuation: number;
   turbulence: number;
+  outputMin: number;
+  outputMax: number;
 }
 
 export interface AudioMapParams {
@@ -55,6 +57,8 @@ export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
   roughness: 0.4,
   attenuation: 0.6,
   turbulence: 8.0,
+  outputMin: -1.0,
+  outputMax: 1.0,
 };
 
 export const DEFAULT_AUDIO_MAP_PARAMS: AudioMapParams = {
@@ -103,6 +107,8 @@ interface PlaneUniforms {
   uRoughness: THREE.IUniform<number>;
   uAttenuation: THREE.IUniform<number>;
   uTurbulence: THREE.IUniform<number>;
+  uOutputMin: THREE.IUniform<number>;
+  uOutputMax: THREE.IUniform<number>;
   uLow: THREE.IUniform<number>;
   uMid: THREE.IUniform<number>;
   uHigh: THREE.IUniform<number>;
@@ -124,7 +130,6 @@ export class DisplacedPlaneScene {
   private readonly controls: OrbitControls;
   private readonly material: THREE.ShaderMaterial;
   private readonly mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
-  private readonly floor: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private geometry: THREE.PlaneGeometry;
   private readonly uniforms: PlaneUniforms;
   private readonly raycaster = new THREE.Raycaster();
@@ -225,6 +230,8 @@ export class DisplacedPlaneScene {
       uRoughness: { value: this.noiseParams.roughness },
       uAttenuation: { value: this.noiseParams.attenuation },
       uTurbulence: { value: this.noiseParams.turbulence },
+      uOutputMin: { value: this.noiseParams.outputMin },
+      uOutputMax: { value: this.noiseParams.outputMax },
       uLow: { value: 0 },
       uMid: { value: 0 },
       uHigh: { value: 0 },
@@ -251,12 +258,9 @@ export class DisplacedPlaneScene {
     this.mesh.rotation.x = -Math.PI * 0.5;
     this.scene.add(this.mesh);
 
-    const floorGeometry = new THREE.PlaneGeometry(PLANE_WIDTH * 1.1, PLANE_DEPTH * 1.1, 1, 1);
-    const floorMaterial = new THREE.MeshBasicMaterial({ color: 0x020305, transparent: true, opacity: 0.72 });
-    this.floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    this.floor.rotation.x = -Math.PI * 0.5;
-    this.floor.position.y = -0.32;
-    this.scene.add(this.floor);
+    this.applyNoiseUniforms();
+    this.applyAudioMapUniforms();
+    this.applyInteractionUniforms();
 
     this.renderer.domElement.addEventListener("pointermove", this.handlePointerMove);
     this.renderer.domElement.addEventListener("pointerleave", this.handlePointerLeave);
@@ -264,26 +268,34 @@ export class DisplacedPlaneScene {
   }
 
   private createGeometry(subdivisions: number): THREE.PlaneGeometry {
-    const clamped = Math.min(512, Math.max(48, Math.round(subdivisions)));
+    const clamped = Math.min(1600, Math.max(48, Math.round(subdivisions)));
     return new THREE.PlaneGeometry(PLANE_WIDTH, PLANE_DEPTH, clamped, clamped);
   }
 
   private applyNoiseUniforms(): void {
-    this.uniforms.uBaseFreq.value = this.noiseParams.baseFreq;
+    const baseFreq = THREE.MathUtils.clamp(this.noiseParams.baseFreq, 0.05, 1.0);
+    const latticeWarpFreq = THREE.MathUtils.clamp(this.noiseParams.latticeWarpFreq, 0.05, 1.0);
+    const turboFreq = THREE.MathUtils.clamp(this.noiseParams.turboFreq, 0.05, 1.0);
+    const outputMin = Math.min(this.noiseParams.outputMin, this.noiseParams.outputMax);
+    const outputMax = Math.max(this.noiseParams.outputMin, this.noiseParams.outputMax);
+
+    this.uniforms.uBaseFreq.value = baseFreq;
     this.uniforms.uBaseOffset.value.set(
       this.noiseParams.baseOffsetX,
       this.noiseParams.baseOffsetY,
       this.noiseParams.baseOffsetZ,
     );
     this.uniforms.uLatticeWarp.value = this.noiseParams.latticeWarp;
-    this.uniforms.uLatticeWarpFreq.value = this.noiseParams.latticeWarpFreq;
+    this.uniforms.uLatticeWarpFreq.value = latticeWarpFreq;
     this.uniforms.uComplement.value = this.noiseParams.complement;
     this.uniforms.uFinalAmp.value = this.noiseParams.finalAmp;
-    this.uniforms.uTurboFreq.value = this.noiseParams.turboFreq;
+    this.uniforms.uTurboFreq.value = turboFreq;
     this.uniforms.uTurboAmp.value = this.noiseParams.turboAmp;
     this.uniforms.uRoughness.value = this.noiseParams.roughness;
     this.uniforms.uAttenuation.value = this.noiseParams.attenuation;
     this.uniforms.uTurbulence.value = this.noiseParams.turbulence;
+    this.uniforms.uOutputMin.value = outputMin;
+    this.uniforms.uOutputMax.value = outputMax;
   }
 
   private applyAudioMapUniforms(): void {
@@ -316,7 +328,7 @@ export class DisplacedPlaneScene {
 
   setQualityParam(key: keyof QualityParams, value: number): void {
     if (key === "subdivisions") {
-      const next = Math.round(value);
+      const next = THREE.MathUtils.clamp(Math.round(value), 48, 1600);
       if (next === this.qualityParams.subdivisions) {
         return;
       }
@@ -379,8 +391,6 @@ export class DisplacedPlaneScene {
     this.controls.dispose();
     this.geometry.dispose();
     this.material.dispose();
-    this.floor.geometry.dispose();
-    this.floor.material.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

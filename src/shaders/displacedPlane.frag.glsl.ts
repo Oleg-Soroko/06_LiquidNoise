@@ -20,8 +20,6 @@ void main() {
   float rim = pow(1.0 - max(dot(viewDir, normal), 0.0), 2.25);
 
   float heightMask = smoothstep(-2.8, 2.6, vHeight);
-  float contour = 0.5 + 0.5 * sin(vHeight * 16.0);
-  float groove = pow(abs(contour), 14.0);
 
   vec3 shadowColor = vec3(0.015, 0.016, 0.018);
   vec3 lightColor = vec3(0.92, 0.93, 0.95);
@@ -32,7 +30,6 @@ void main() {
 
   float audioTint = clamp((uLow * 0.25 + uMid * 0.55 + uHigh * 0.2), 0.0, 1.0);
   shaded *= mix(0.92, 1.04, audioTint);
-  shaded -= groove * (0.1 + uMid * 0.12);
   shaded += rim * 0.18;
 
   gl_FragColor = vec4(max(shaded, vec3(0.0)), 1.0);

@@ -17,6 +17,8 @@ uniform float uTurboAmp;
 uniform float uRoughness;
 uniform float uAttenuation;
 uniform float uTurbulence;
+uniform float uOutputMin;
+uniform float uOutputMax;
 
 uniform float uLow;
 uniform float uMid;
@@ -131,11 +133,15 @@ vec3 warpVector(vec3 p) {
 
 float alligatorTurbulence(vec3 p) {
   float sum = 0.0;
-  float amp = max(0.0001, uTurboAmp);
+  float amp = max(0.0, uTurboAmp);
   float freq = max(0.0001, uTurboFreq);
   float norm = 0.0;
   float roughPow = mix(0.9, 3.5, clamp(uRoughness, 0.0, 1.0));
   float atten = clamp(uAttenuation, 0.05, 0.98);
+
+  if (amp <= 0.000001) {
+    return 0.0;
+  }
 
   for (int i = 0; i < 8; i++) {
     float enabled = step(float(i), uTurbulence - 0.5);
@@ -162,28 +168,21 @@ void main() {
   vUv = uv;
 
   vec3 basePos = vec3(position.xy, uTime * uDriftSpeed) + uBaseOffset;
-  vec3 baseDomain = basePos * max(0.0001, uBaseFreq);
+  vec3 simplexInput = basePos * max(0.0001, uBaseFreq);
+  vec3 simplexWarp = warpVector(simplexInput * max(0.0001, uLatticeWarpFreq)) * uLatticeWarp;
+  vec3 simplexWarped = simplexInput + simplexWarp;
 
-  float base = baseNoise(baseDomain);
-  vec3 warp = warpVector(baseDomain * max(0.0001, uLatticeWarpFreq)) * uLatticeWarp;
-  vec3 warpedDomain = baseDomain + warp;
-
-  float turbo = alligatorTurbulence(warpedDomain);
-  float baseSigned = base * 2.0 - 1.0;
-  float turboSigned = turbo * 2.0 - 1.0;
-
-  float structure = baseSigned * 0.68 + turboSigned * 0.92;
-  float contourFreq = mix(10.0, 28.0, clamp(uRoughness + uMid * 0.3, 0.0, 1.0));
-  float contour = sin((structure + turbo * 0.65) * contourFreq);
-  float contourShape = sign(contour) * pow(abs(contour), 1.8);
-  float shaped = mix(structure, structure + contourShape * 0.38, 0.72);
+  float simplex01 = baseNoise(simplexWarped);
+  vec3 alligatorPos = vec3(simplex01, simplex01, simplex01);
+  float alligator01 = clamp(alligatorTurbulence(alligatorPos), 0.0, 1.0);
+  float finalRemap = mix(uOutputMin, uOutputMax, alligator01);
 
   float macroAudio = 1.0 + (uLow * uLowGain + uMid * uMidGain) * uGlobalGain;
   float fine = snoise(
-    warpedDomain * 3.35 +
+    simplexWarped * 3.35 +
     vec3(0.0, 0.0, uTime * (uDriftSpeed * 1.9 + 0.03))
   );
-  float audioShape = shaped * macroAudio + fine * uHigh * uHighGain * uGlobalGain * 0.45;
+  float audioShape = finalRemap * macroAudio + fine * uHigh * uHighGain * uGlobalGain * 0.45;
 
   float distToMouse = distance(vUv, uMouseUv);
   float mouseFalloff = 1.0 - smoothstep(0.0, max(0.0001, uMouseRadius), distToMouse);

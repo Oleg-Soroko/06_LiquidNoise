@@ -210,8 +210,8 @@ export function createControlPanel(
   const unifiedBody = requireElement<HTMLDivElement>(unifiedFolder, ".folder-body");
   bindRange(unifiedBody, noiseParams, "baseFreq", {
     label: "Base Frequency",
-    min: 0.1,
-    max: 2.5,
+    min: 0.05,
+    max: 1.0,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
@@ -246,7 +246,7 @@ export function createControlPanel(
   bindRange(unifiedBody, noiseParams, "latticeWarpFreq", {
     label: "Warp Frequency",
     min: 0.05,
-    max: 2.5,
+    max: 1.0,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
@@ -258,13 +258,27 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
+  bindRange(unifiedBody, noiseParams, "outputMin", {
+    label: "Output Min",
+    min: -2.0,
+    max: 2.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(unifiedBody, noiseParams, "outputMax", {
+    label: "Output Max",
+    min: -2.0,
+    max: 2.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
 
   const turboFolder = createFolder("Turbo Noise", true);
   const turboBody = requireElement<HTMLDivElement>(turboFolder, ".folder-body");
   bindRange(turboBody, noiseParams, "turboFreq", {
     label: "Frequency",
     min: 0.05,
-    max: 2.5,
+    max: 1.0,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
@@ -378,7 +392,7 @@ export function createControlPanel(
   bindRange(qualityBody, qualityParams, "subdivisions", {
     label: "Subdivisions",
     min: 48,
-    max: 512,
+    max: 1600,
     step: 1,
     precision: 0,
     changeOnly: true,
