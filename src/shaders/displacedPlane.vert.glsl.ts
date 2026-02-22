@@ -32,7 +32,10 @@ uniform vec2 uMouseUv;
 uniform float uMouseRadius;
 uniform float uMouseStrength;
 uniform float uEdgeFade;
+uniform float uEdgeRadius;
+uniform float uEdgePower;
 uniform float uDriftSpeed;
+uniform float uIsFloor;
 
 vec3 mod289(vec3 x) {
   return x - floor(x * (1.0 / 289.0)) * 289.0;
@@ -160,8 +163,12 @@ float alligatorTurbulence(vec3 p) {
 }
 
 float edgePin(vec2 uv) {
-  float border = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-  return smoothstep(0.0, max(0.0005, uEdgeFade), border);
+  float radius = clamp(uEdgeRadius, 0.01, 0.71);
+  float fade = max(0.0005, uEdgeFade);
+  float power = max(0.01, uEdgePower);
+  float distToCenter = distance(uv, vec2(0.5));
+  float pin = 1.0 - smoothstep(radius - fade, radius, distToCenter);
+  return pow(clamp(pin, 0.0, 1.0), power);
 }
 
 void main() {
@@ -189,6 +196,9 @@ void main() {
   float mouseTerm = mouseFalloff * uMouseStrength;
 
   float height = edgePin(vUv) * ((audioShape * uFinalAmp) + mouseTerm);
+  if (uIsFloor > 0.5) {
+    height = 0.0;
+  }
   vHeight = height;
 
   vec3 displaced = position;

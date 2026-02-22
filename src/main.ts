@@ -8,11 +8,13 @@ import {
   DEFAULT_INTERACTION_PARAMS,
   DEFAULT_NOISE_PARAMS,
   DEFAULT_QUALITY_PARAMS,
+  DEFAULT_SHADING_PARAMS,
   DisplacedPlaneScene,
   type AudioMapParams,
   type HoudiniNoiseParams,
   type InteractionParams,
   type QualityParams,
+  type ShadingParams,
 } from "./visual/DisplacedPlaneScene";
 
 function requireElement<T extends HTMLElement>(selector: string): T {
@@ -45,6 +47,7 @@ const noiseParams: HoudiniNoiseParams = { ...DEFAULT_NOISE_PARAMS };
 const audioMapParams: AudioMapParams = { ...DEFAULT_AUDIO_MAP_PARAMS };
 const interactionParams: InteractionParams = { ...DEFAULT_INTERACTION_PARAMS };
 const qualityParams: QualityParams = { ...DEFAULT_QUALITY_PARAMS };
+const shadingParams: ShadingParams = { ...DEFAULT_SHADING_PARAMS };
 
 const audioElement = new Audio();
 audioElement.preload = "auto";
@@ -60,6 +63,7 @@ const scene = new DisplacedPlaneScene({
   audioMapParams,
   interactionParams,
   qualityParams,
+  shadingParams,
 });
 
 let controlPanel: ControlPanelApi;
@@ -70,6 +74,7 @@ controlPanel = createControlPanel(
     audioMapParams,
     interactionParams,
     qualityParams,
+    shadingParams,
   },
   {
     onFileSelected: async (file: File): Promise<void> => {
@@ -142,6 +147,11 @@ controlPanel = createControlPanel(
     onQualityParamChange: (key, value): void => {
       qualityParams[key] = value;
       scene.setQualityParam(key, value);
+    },
+
+    onShadingParamChange: (key, value): void => {
+      shadingParams[key] = value;
+      scene.setShadingParam(key, value);
     },
   },
 );

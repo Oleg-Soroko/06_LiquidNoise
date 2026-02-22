@@ -3,6 +3,7 @@ import type {
   HoudiniNoiseParams,
   InteractionParams,
   QualityParams,
+  ShadingParams,
 } from "../visual/DisplacedPlaneScene";
 
 export interface ControlPanelState {
@@ -10,6 +11,7 @@ export interface ControlPanelState {
   audioMapParams: AudioMapParams;
   interactionParams: InteractionParams;
   qualityParams: QualityParams;
+  shadingParams: ShadingParams;
 }
 
 export interface ControlCallbacks {
@@ -20,6 +22,7 @@ export interface ControlCallbacks {
   onAudioMapParamChange(key: keyof AudioMapParams, value: number): void;
   onInteractionParamChange(key: keyof InteractionParams, value: number): void;
   onQualityParamChange(key: keyof QualityParams, value: number): void;
+  onShadingParamChange(key: keyof ShadingParams, value: number): void;
 }
 
 export interface ControlPanelApi {
@@ -105,6 +108,7 @@ export function createControlPanel(
   const audioMapParams: AudioMapParams = { ...initialState.audioMapParams };
   const interactionParams: InteractionParams = { ...initialState.interactionParams };
   const qualityParams: QualityParams = { ...initialState.qualityParams };
+  const shadingParams: ShadingParams = { ...initialState.shadingParams };
 
   const cleanup: Array<() => void> = [];
 
@@ -375,9 +379,23 @@ export function createControlPanel(
   bindRange(interactionBody, interactionParams, "edgeFade", {
     label: "Edge Fade",
     min: 0.005,
-    max: 0.4,
+    max: 0.5,
     step: 0.001,
     precision: 3,
+  }, callbacks.onInteractionParamChange);
+  bindRange(interactionBody, interactionParams, "edgeRadius", {
+    label: "Edge Radius",
+    min: 0.1,
+    max: 0.71,
+    step: 0.001,
+    precision: 3,
+  }, callbacks.onInteractionParamChange);
+  bindRange(interactionBody, interactionParams, "edgePower", {
+    label: "Edge Power",
+    min: 0.1,
+    max: 4,
+    step: 0.01,
+    precision: 2,
   }, callbacks.onInteractionParamChange);
   bindRange(interactionBody, interactionParams, "driftSpeed", {
     label: "Drift Speed",
@@ -386,6 +404,139 @@ export function createControlPanel(
     step: 0.001,
     precision: 3,
   }, callbacks.onInteractionParamChange);
+
+  const shadingFolder = createFolder("Shader / Lighting", true);
+  const shadingBody = requireElement<HTMLDivElement>(shadingFolder, ".folder-body");
+  bindRange(shadingBody, shadingParams, "keyAzimuth", {
+    label: "Key Azimuth",
+    min: -180,
+    max: 180,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "keyElevation", {
+    label: "Key Elevation",
+    min: -89,
+    max: 89,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "keyStrength", {
+    label: "Key Strength",
+    min: 0,
+    max: 1.5,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "fillAzimuth", {
+    label: "Fill Azimuth",
+    min: -180,
+    max: 180,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "fillElevation", {
+    label: "Fill Elevation",
+    min: -89,
+    max: 89,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "fillStrength", {
+    label: "Fill Strength",
+    min: 0,
+    max: 1.5,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "hemiStrength", {
+    label: "Hemi Strength",
+    min: 0,
+    max: 1.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "diffuseBase", {
+    label: "Diffuse Base",
+    min: 0,
+    max: 1.2,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "baseColorR", {
+    label: "Base Color R",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "baseColorG", {
+    label: "Base Color G",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "baseColorB", {
+    label: "Base Color B",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "cavitySlopeScale", {
+    label: "Cavity Slope",
+    min: 0,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "cavityCurvatureScale", {
+    label: "Cavity Curvature",
+    min: 0,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "cavityPower", {
+    label: "Cavity Power",
+    min: 0.1,
+    max: 2.5,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "cavityStrength", {
+    label: "Cavity Strength",
+    min: 0,
+    max: 2.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "cavityMax", {
+    label: "Cavity Max",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "shadeMin", {
+    label: "Shade Min",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
+  bindRange(shadingBody, shadingParams, "shadeMax", {
+    label: "Shade Max",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onShadingParamChange);
 
   const qualityFolder = createFolder("Quality / Render", true);
   const qualityBody = requireElement<HTMLDivElement>(qualityFolder, ".folder-body");
@@ -409,6 +560,7 @@ export function createControlPanel(
   foldersRoot.appendChild(turboFolder);
   foldersRoot.appendChild(audioFolder);
   foldersRoot.appendChild(interactionFolder);
+  foldersRoot.appendChild(shadingFolder);
   foldersRoot.appendChild(qualityFolder);
 
   const onFileChange = async (): Promise<void> => {
