@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { SAOPass } from "three/examples/jsm/postprocessing/SAOPass.js";
 import type { AudioBands } from "../audio/BandAnalyzer";
 import { displacedPlaneFragmentShader } from "../shaders/displacedPlane.frag.glsl";
 import { displacedPlaneVertexShader } from "../shaders/displacedPlane.vert.glsl";
@@ -20,6 +24,7 @@ export interface HoudiniNoiseParams {
   turbulence: number;
   outputMin: number;
   outputMax: number;
+  driftSpeed: number;
 }
 
 export interface AudioMapParams {
@@ -34,15 +39,53 @@ export interface AudioMapParams {
 export interface InteractionParams {
   mouseRadius: number;
   mouseStrength: number;
+  mouseNoiseOffset: number;
   edgeFade: number;
   edgeRadius: number;
   edgePower: number;
-  driftSpeed: number;
 }
 
 export interface QualityParams {
   subdivisions: number;
   pixelRatioMax: number;
+}
+
+export interface CameraParams {
+  fov: number;
+  minDistance: number;
+  maxDistance: number;
+  minPolarDeg: number;
+  maxPolarDeg: number;
+  minAzimuthDeg: number;
+  maxAzimuthDeg: number;
+  centerLock: number;
+  panRange: number;
+}
+
+export interface MaterialParams {
+  diffuse: number;
+  roughness: number;
+  metalness: number;
+  clearcoat: number;
+  normalStrength: number;
+  matcapBrightness: number;
+  matcapBlur: number;
+  matcapContrast: number;
+  matcapSaturation: number;
+}
+
+export type MaterialMode = "pbr" | "matcap";
+export type MaterialMapSlot = "albedo" | "roughness" | "metalness" | "clearcoat" | "normal" | "matcap";
+
+export type AmbientOcclusionMode = "none" | "gtao" | "sao";
+
+export interface AmbientOcclusionParams {
+  mode: AmbientOcclusionMode;
+  intensity: number;
+  radius: number;
+  thickness: number;
+  falloff: number;
+  denoiseRadius: number;
 }
 
 export interface ShadingParams {
@@ -57,31 +100,25 @@ export interface ShadingParams {
   baseColorR: number;
   baseColorG: number;
   baseColorB: number;
-  cavitySlopeScale: number;
-  cavityCurvatureScale: number;
-  cavityPower: number;
-  cavityStrength: number;
-  cavityMax: number;
-  shadeMin: number;
-  shadeMax: number;
 }
 
 export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
-  baseFreq: 1.0,
-  baseOffsetX: 2.0,
-  baseOffsetY: 0.0,
-  baseOffsetZ: 0.0,
-  latticeWarp: 0.3,
-  latticeWarpFreq: 0.4,
-  complement: 1.0,
-  finalAmp: 3.0,
+  baseFreq: 0.32,
+  baseOffsetX: -8.0,
+  baseOffsetY: -8.0,
+  baseOffsetZ: -8.0,
+  latticeWarp: 0.0,
+  latticeWarpFreq: 0.05,
+  complement: 0.0,
+  finalAmp: 8.0,
   turboFreq: 0.7,
   turboAmp: 1.0,
-  roughness: 0.4,
-  attenuation: 0.6,
+  roughness: 0.1,
+  attenuation: 0.42,
   turbulence: 8.0,
-  outputMin: -1.0,
-  outputMax: 1.0,
+  outputMin: -0.06,
+  outputMax: 0.44,
+  driftSpeed: 0.174,
 };
 
 export const DEFAULT_AUDIO_MAP_PARAMS: AudioMapParams = {
@@ -94,38 +131,66 @@ export const DEFAULT_AUDIO_MAP_PARAMS: AudioMapParams = {
 };
 
 export const DEFAULT_INTERACTION_PARAMS: InteractionParams = {
-  mouseRadius: 0.16,
-  mouseStrength: 0.8,
-  edgeFade: 0.085,
-  edgeRadius: 0.48,
-  edgePower: 1.0,
-  driftSpeed: 0.115,
+  mouseRadius: 0.5,
+  mouseStrength: 0.28,
+  mouseNoiseOffset: 0,
+  edgeFade: 0.407,
+  edgeRadius: 0.5,
+  edgePower: 1.23,
 };
 
 export const DEFAULT_QUALITY_PARAMS: QualityParams = {
-  subdivisions: 256,
-  pixelRatioMax: 2.0,
+  subdivisions: 1024,
+  pixelRatioMax: 1.0,
+};
+
+export const DEFAULT_CAMERA_PARAMS: CameraParams = {
+  fov: 28,
+  minDistance: 12,
+  maxDistance: 24,
+  minPolarDeg: 0,
+  maxPolarDeg: 63,
+  minAzimuthDeg: -180,
+  maxAzimuthDeg: 180,
+  centerLock: 0,
+  panRange: 2.5,
+};
+
+export const DEFAULT_MATERIAL_PARAMS: MaterialParams = {
+  diffuse: 2.0,
+  roughness: 0.64,
+  metalness: 1.0,
+  clearcoat: 0.0,
+  normalStrength: 0.0,
+  matcapBrightness: 2.22,
+  matcapBlur: 0.0,
+  matcapContrast: 1.0,
+  matcapSaturation: 1.0,
+};
+
+export const DEFAULT_MATERIAL_MODE: MaterialMode = "matcap";
+
+export const DEFAULT_AMBIENT_OCCLUSION_PARAMS: AmbientOcclusionParams = {
+  mode: "none",
+  intensity: 0.75,
+  radius: 0.8,
+  thickness: 1.0,
+  falloff: 1.0,
+  denoiseRadius: 12,
 };
 
 export const DEFAULT_SHADING_PARAMS: ShadingParams = {
-  keyAzimuth: 161,
-  keyElevation: 69,
-  keyStrength: 0.28,
-  fillAzimuth: -45,
-  fillElevation: 34,
-  fillStrength: 0.10,
-  hemiStrength: 0.06,
-  diffuseBase: 0.56,
+  keyAzimuth: 90,
+  keyElevation: 46,
+  keyStrength: 1.0,
+  fillAzimuth: -146,
+  fillElevation: 7,
+  fillStrength: 1.05,
+  hemiStrength: 0.05,
+  diffuseBase: 0.22,
   baseColorR: 0.90,
   baseColorG: 0.90,
   baseColorB: 0.91,
-  cavitySlopeScale: 1.25,
-  cavityCurvatureScale: 0.70,
-  cavityPower: 0.78,
-  cavityStrength: 0.58,
-  cavityMax: 0.72,
-  shadeMin: 0.02,
-  shadeMax: 0.98,
 };
 
 export interface DisplacedPlaneSceneOptions {
@@ -134,6 +199,10 @@ export interface DisplacedPlaneSceneOptions {
   audioMapParams: AudioMapParams;
   interactionParams: InteractionParams;
   qualityParams: QualityParams;
+  cameraParams: CameraParams;
+  materialMode: MaterialMode;
+  materialParams: MaterialParams;
+  ambientOcclusionParams: AmbientOcclusionParams;
   shadingParams: ShadingParams;
 }
 
@@ -142,11 +211,17 @@ const PLANE_WIDTH = PLANE_SIZE;
 const PLANE_DEPTH = PLANE_SIZE;
 const FLOOR_SIZE = 220;
 const FLOOR_Y = -0.003;
+const BACKGROUND_FLOOR_SIZE = 600;
+const BACKGROUND_FLOOR_Y = -0.0038;
 const UNDERLAY_Y = -0.0012;
 const FLOOR_HOLE_MARGIN = 0.02;
 const FLOOR_CIRCLE_RADIUS = 58;
 const FLOOR_CIRCLE_FADE = 16;
 const FLOOR_OPACITY = 1.0;
+const BACKGROUND_HOLE_EXTRA = 0.03;
+const BACKGROUND_CIRCLE_RADIUS = 100000;
+const BACKGROUND_CIRCLE_FADE = 1;
+const DEFAULT_MATCAP_SIZE = 512;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 interface PlaneUniforms {
@@ -174,6 +249,10 @@ interface PlaneUniforms {
   uMouseUv: THREE.IUniform<THREE.Vector2>;
   uMouseRadius: THREE.IUniform<number>;
   uMouseStrength: THREE.IUniform<number>;
+  uMouseHover: THREE.IUniform<number>;
+  uMouseMoveDir: THREE.IUniform<THREE.Vector2>;
+  uMouseNoiseOffset: THREE.IUniform<number>;
+  uPulseAge: THREE.IUniform<number>;
   uEdgeFade: THREE.IUniform<number>;
   uEdgeRadius: THREE.IUniform<number>;
   uEdgePower: THREE.IUniform<number>;
@@ -183,6 +262,29 @@ interface PlaneUniforms {
   uFloorCircleRadius: THREE.IUniform<number>;
   uFloorCircleFade: THREE.IUniform<number>;
   uFloorOpacity: THREE.IUniform<number>;
+  uMaterialMode: THREE.IUniform<number>;
+  uMatDiffuse: THREE.IUniform<number>;
+  uMatRoughness: THREE.IUniform<number>;
+  uMatMetalness: THREE.IUniform<number>;
+  uMatClearcoat: THREE.IUniform<number>;
+  uMatNormalStrength: THREE.IUniform<number>;
+  uAlbedoMap: THREE.IUniform<THREE.Texture>;
+  uRoughnessMap: THREE.IUniform<THREE.Texture>;
+  uMetalnessMap: THREE.IUniform<THREE.Texture>;
+  uClearcoatMap: THREE.IUniform<THREE.Texture>;
+  uNormalMap: THREE.IUniform<THREE.Texture>;
+  uMatcapMap: THREE.IUniform<THREE.Texture>;
+  uUseAlbedoMap: THREE.IUniform<number>;
+  uUseRoughnessMap: THREE.IUniform<number>;
+  uUseMetalnessMap: THREE.IUniform<number>;
+  uUseClearcoatMap: THREE.IUniform<number>;
+  uUseNormalMap: THREE.IUniform<number>;
+  uUseMatcapMap: THREE.IUniform<number>;
+  uMatcapBrightness: THREE.IUniform<number>;
+  uMatcapBlur: THREE.IUniform<number>;
+  uMatcapContrast: THREE.IUniform<number>;
+  uMatcapSaturation: THREE.IUniform<number>;
+  uMatcapTexelSize: THREE.IUniform<THREE.Vector2>;
   uKeyDir: THREE.IUniform<THREE.Vector3>;
   uFillDir: THREE.IUniform<THREE.Vector3>;
   uKeyStrength: THREE.IUniform<number>;
@@ -190,13 +292,6 @@ interface PlaneUniforms {
   uHemiStrength: THREE.IUniform<number>;
   uDiffuseBase: THREE.IUniform<number>;
   uBaseColor: THREE.IUniform<THREE.Vector3>;
-  uCavitySlopeScale: THREE.IUniform<number>;
-  uCavityCurvatureScale: THREE.IUniform<number>;
-  uCavityPower: THREE.IUniform<number>;
-  uCavityStrength: THREE.IUniform<number>;
-  uCavityMax: THREE.IUniform<number>;
-  uShadeMin: THREE.IUniform<number>;
-  uShadeMax: THREE.IUniform<number>;
 }
 
 export class DisplacedPlaneScene {
@@ -204,22 +299,38 @@ export class DisplacedPlaneScene {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly controls: OrbitControls;
+  private readonly composer: EffectComposer;
+  private readonly renderPass: RenderPass;
+  private readonly gtaoPass: GTAOPass;
+  private readonly saoPass: SAOPass;
+  private readonly aoDepthTarget: THREE.WebGLRenderTarget;
+  private readonly aoDepthTexture: THREE.DepthTexture;
   private readonly material: THREE.ShaderMaterial;
   private readonly floorMaterial: THREE.ShaderMaterial;
+  private readonly backgroundFloorMaterial: THREE.ShaderMaterial;
   private readonly mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly underlayMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly floorMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private readonly backgroundFloorMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private geometry: THREE.PlaneGeometry;
   private underlayGeometry: THREE.PlaneGeometry;
   private floorGeometry: THREE.PlaneGeometry;
+  private backgroundFloorGeometry: THREE.PlaneGeometry;
   private readonly uniforms: PlaneUniforms;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerNdc = new THREE.Vector2();
   private readonly pointerWorld = new THREE.Vector3();
+  private readonly clearColorScratch = new THREE.Color();
   private readonly pointerUvTarget = new THREE.Vector2(0.5, 0.5);
+  private readonly pointerMoveDirTarget = new THREE.Vector2();
+  private readonly pointerMoveDirCurrent = new THREE.Vector2();
+  private readonly pointerMoveDelta = new THREE.Vector2();
   private readonly floorPlane = new THREE.Plane(WORLD_UP, 0);
+  private readonly controlsCenter = new THREE.Vector3(0, 0.1, 0);
+  private readonly targetDelta = new THREE.Vector3();
   private mouseStrengthCurrent = 0;
   private mouseStrengthTarget = 0;
+  private pulseAge = -1;
   private audioLow = 0;
   private audioMid = 0;
   private audioHigh = 0;
@@ -230,12 +341,22 @@ export class DisplacedPlaneScene {
   private audioMapParams: AudioMapParams;
   private interactionParams: InteractionParams;
   private qualityParams: QualityParams;
+  private cameraParams: CameraParams;
+  private materialMode: MaterialMode;
+  private materialParams: MaterialParams;
+  private ambientOcclusionParams: AmbientOcclusionParams;
   private shadingParams: ShadingParams;
+  private readonly textureLoader = new THREE.TextureLoader();
+  private readonly mapTextures: Partial<Record<MaterialMapSlot, THREE.Texture>> = {};
+  private readonly defaultAlbedoTexture: THREE.DataTexture;
+  private readonly defaultScalarTexture: THREE.DataTexture;
+  private readonly defaultNormalTexture: THREE.DataTexture;
+  private readonly defaultMatcapTexture: THREE.DataTexture;
 
-  private readonly handlePointerMove = (event: PointerEvent): void => {
+  private pointerEventToUv(event: PointerEvent): THREE.Vector2 | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
-      return;
+      return null;
     }
 
     const normalizedX = (event.clientX - rect.left) / rect.width;
@@ -245,23 +366,52 @@ export class DisplacedPlaneScene {
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
     const hit = this.raycaster.ray.intersectPlane(this.floorPlane, this.pointerWorld);
     if (!hit) {
-      this.mouseStrengthTarget = 0;
-      return;
+      return null;
     }
 
     const u = this.pointerWorld.x / PLANE_WIDTH + 0.5;
-    const v = this.pointerWorld.z / PLANE_DEPTH + 0.5;
+    // Plane is rotated -90deg on X, so world Z maps to inverted V.
+    const v = 0.5 - this.pointerWorld.z / PLANE_DEPTH;
     if (u < 0 || u > 1 || v < 0 || v > 1) {
-      this.mouseStrengthTarget = 0;
-      return;
+      return null;
     }
 
-    this.pointerUvTarget.set(u, v);
+    return new THREE.Vector2(u, v);
+  }
+
+  private readonly handlePointerMove = (event: PointerEvent): void => {
+    const uv = this.pointerEventToUv(event);
+    if (!uv) {
+      this.mouseStrengthTarget = 0;
+      this.pointerMoveDirTarget.set(0, 0);
+      return;
+    }
+    this.pointerMoveDelta.copy(uv).sub(this.pointerUvTarget);
+    if (this.pointerMoveDelta.lengthSq() > 0.00000001) {
+      this.pointerMoveDelta.normalize();
+      this.pointerMoveDirTarget.copy(this.pointerMoveDelta);
+    }
+    this.pointerUvTarget.copy(uv);
     this.mouseStrengthTarget = 1;
+  };
+
+  private readonly handlePointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) {
+      return;
+    }
+    const uv = this.pointerEventToUv(event);
+    if (!uv) {
+      return;
+    }
+    this.pointerUvTarget.copy(uv);
+    this.uniforms.uMouseUv.value.copy(uv);
+    this.mouseStrengthTarget = 1;
+    this.pulseAge = 0;
   };
 
   private readonly handlePointerLeave = (): void => {
     this.mouseStrengthTarget = 0;
+    this.pointerMoveDirTarget.set(0, 0);
   };
 
   constructor(options: DisplacedPlaneSceneOptions) {
@@ -270,7 +420,15 @@ export class DisplacedPlaneScene {
     this.audioMapParams = { ...options.audioMapParams };
     this.interactionParams = { ...options.interactionParams };
     this.qualityParams = { ...options.qualityParams };
+    this.cameraParams = { ...options.cameraParams };
+    this.materialMode = options.materialMode;
+    this.materialParams = { ...options.materialParams };
+    this.ambientOcclusionParams = { ...options.ambientOcclusionParams };
     this.shadingParams = { ...options.shadingParams };
+    this.defaultAlbedoTexture = this.createSolidTexture(255, 255, 255, THREE.SRGBColorSpace);
+    this.defaultScalarTexture = this.createSolidTexture(255, 255, 255, THREE.NoColorSpace);
+    this.defaultNormalTexture = this.createSolidTexture(128, 128, 255, THREE.NoColorSpace);
+    this.defaultMatcapTexture = this.createDefaultMatcapTexture(DEFAULT_MATCAP_SIZE);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -289,10 +447,33 @@ export class DisplacedPlaneScene {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.target.set(0, 0.1, 0);
-    this.controls.minDistance = 5;
-    this.controls.maxDistance = 28;
-    this.controls.maxPolarAngle = Math.PI * 0.49;
+    this.controls.target.copy(this.controlsCenter);
+
+    this.composer = new EffectComposer(this.renderer);
+    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(this.renderPass);
+
+    this.gtaoPass = new GTAOPass(this.scene, this.camera, 512, 512);
+    this.gtaoPass.output = GTAOPass.OUTPUT.Default;
+    this.composer.addPass(this.gtaoPass);
+
+    this.saoPass = new SAOPass(this.scene, this.camera);
+    this.saoPass.params.output = SAOPass.OUTPUT.Default;
+    this.composer.addPass(this.saoPass);
+
+    this.aoDepthTexture = new THREE.DepthTexture(1, 1, THREE.UnsignedInt248Type);
+    this.aoDepthTexture.format = THREE.DepthStencilFormat;
+    this.aoDepthTexture.type = THREE.UnsignedInt248Type;
+    this.aoDepthTarget = new THREE.WebGLRenderTarget(1, 1, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      type: THREE.HalfFloatType,
+      depthTexture: this.aoDepthTexture,
+      depthBuffer: true,
+      stencilBuffer: true,
+    });
+    this.aoDepthTarget.texture.generateMipmaps = false;
+    this.gtaoPass.setGBuffer(this.aoDepthTexture);
 
     this.uniforms = {
       uTime: { value: 0 },
@@ -324,11 +505,15 @@ export class DisplacedPlaneScene {
       uGlobalGain: { value: this.audioMapParams.globalGain },
       uMouseUv: { value: new THREE.Vector2(0.5, 0.5) },
       uMouseRadius: { value: this.interactionParams.mouseRadius },
-      uMouseStrength: { value: 0 },
+      uMouseStrength: { value: this.interactionParams.mouseStrength },
+      uMouseHover: { value: 0 },
+      uMouseMoveDir: { value: new THREE.Vector2(0, 0) },
+      uMouseNoiseOffset: { value: this.interactionParams.mouseNoiseOffset },
+      uPulseAge: { value: -1 },
       uEdgeFade: { value: this.interactionParams.edgeFade },
       uEdgeRadius: { value: this.interactionParams.edgeRadius },
       uEdgePower: { value: this.interactionParams.edgePower },
-      uDriftSpeed: { value: this.interactionParams.driftSpeed },
+      uDriftSpeed: { value: this.noiseParams.driftSpeed },
       uIsFloor: { value: 0 },
       uFloorHoleHalfSize: {
         value: new THREE.Vector2(
@@ -339,6 +524,29 @@ export class DisplacedPlaneScene {
       uFloorCircleRadius: { value: FLOOR_CIRCLE_RADIUS },
       uFloorCircleFade: { value: FLOOR_CIRCLE_FADE },
       uFloorOpacity: { value: FLOOR_OPACITY },
+      uMaterialMode: { value: this.materialMode === "matcap" ? 1 : 0 },
+      uMatDiffuse: { value: this.materialParams.diffuse },
+      uMatRoughness: { value: this.materialParams.roughness },
+      uMatMetalness: { value: this.materialParams.metalness },
+      uMatClearcoat: { value: this.materialParams.clearcoat },
+      uMatNormalStrength: { value: this.materialParams.normalStrength },
+      uAlbedoMap: { value: this.defaultAlbedoTexture },
+      uRoughnessMap: { value: this.defaultScalarTexture },
+      uMetalnessMap: { value: this.defaultScalarTexture },
+      uClearcoatMap: { value: this.defaultScalarTexture },
+      uNormalMap: { value: this.defaultNormalTexture },
+      uMatcapMap: { value: this.defaultMatcapTexture },
+      uUseAlbedoMap: { value: 0 },
+      uUseRoughnessMap: { value: 0 },
+      uUseMetalnessMap: { value: 0 },
+      uUseClearcoatMap: { value: 0 },
+      uUseNormalMap: { value: 0 },
+      uUseMatcapMap: { value: 1 },
+      uMatcapBrightness: { value: this.materialParams.matcapBrightness },
+      uMatcapBlur: { value: this.materialParams.matcapBlur },
+      uMatcapContrast: { value: this.materialParams.matcapContrast },
+      uMatcapSaturation: { value: this.materialParams.matcapSaturation },
+      uMatcapTexelSize: { value: new THREE.Vector2(1 / DEFAULT_MATCAP_SIZE, 1 / DEFAULT_MATCAP_SIZE) },
       uKeyDir: { value: new THREE.Vector3(0, 1, 0) },
       uFillDir: { value: new THREE.Vector3(0, 1, 0) },
       uKeyStrength: { value: this.shadingParams.keyStrength },
@@ -352,18 +560,24 @@ export class DisplacedPlaneScene {
           this.shadingParams.baseColorB,
         ),
       },
-      uCavitySlopeScale: { value: this.shadingParams.cavitySlopeScale },
-      uCavityCurvatureScale: { value: this.shadingParams.cavityCurvatureScale },
-      uCavityPower: { value: this.shadingParams.cavityPower },
-      uCavityStrength: { value: this.shadingParams.cavityStrength },
-      uCavityMax: { value: this.shadingParams.cavityMax },
-      uShadeMin: { value: this.shadingParams.shadeMin },
-      uShadeMax: { value: this.shadingParams.shadeMax },
     };
 
     const floorUniforms: PlaneUniforms = {
       ...this.uniforms,
       uIsFloor: { value: 1 },
+    };
+    const backgroundFloorUniforms: PlaneUniforms = {
+      ...this.uniforms,
+      uIsFloor: { value: 1 },
+      uFloorHoleHalfSize: {
+        value: new THREE.Vector2(
+          Math.max(0.001, PLANE_WIDTH * 0.5 - FLOOR_HOLE_MARGIN + BACKGROUND_HOLE_EXTRA),
+          Math.max(0.001, PLANE_DEPTH * 0.5 - FLOOR_HOLE_MARGIN + BACKGROUND_HOLE_EXTRA),
+        ),
+      },
+      uFloorCircleRadius: { value: BACKGROUND_CIRCLE_RADIUS },
+      uFloorCircleFade: { value: BACKGROUND_CIRCLE_FADE },
+      uFloorOpacity: { value: 1 },
     };
 
     this.material = new THREE.ShaderMaterial({
@@ -380,6 +594,14 @@ export class DisplacedPlaneScene {
       transparent: true,
       depthWrite: false,
     });
+    this.backgroundFloorMaterial = new THREE.ShaderMaterial({
+      uniforms: backgroundFloorUniforms as unknown as Record<string, THREE.IUniform>,
+      vertexShader: displacedPlaneVertexShader,
+      fragmentShader: displacedPlaneFragmentShader,
+      side: THREE.FrontSide,
+      transparent: false,
+      depthWrite: true,
+    });
 
     this.floorGeometry = this.createFloorGeometry();
     this.floorMesh = new THREE.Mesh(this.floorGeometry, this.floorMaterial);
@@ -387,6 +609,13 @@ export class DisplacedPlaneScene {
     this.floorMesh.position.y = FLOOR_Y;
     this.floorMesh.renderOrder = -1;
     this.scene.add(this.floorMesh);
+
+    this.backgroundFloorGeometry = this.createBackgroundFloorGeometry();
+    this.backgroundFloorMesh = new THREE.Mesh(this.backgroundFloorGeometry, this.backgroundFloorMaterial);
+    this.backgroundFloorMesh.rotation.x = -Math.PI * 0.5;
+    this.backgroundFloorMesh.position.y = BACKGROUND_FLOOR_Y;
+    this.backgroundFloorMesh.renderOrder = -2;
+    this.scene.add(this.backgroundFloorMesh);
 
     this.geometry = this.createGeometry(this.qualityParams.subdivisions);
     this.mesh = new THREE.Mesh(this.geometry, this.material);
@@ -404,15 +633,95 @@ export class DisplacedPlaneScene {
     this.applyNoiseUniforms();
     this.applyAudioMapUniforms();
     this.applyInteractionUniforms();
+    this.applyCameraParams();
+    this.applyMaterialUniforms();
     this.applyShadingUniforms();
+    this.applyAmbientOcclusionParams();
 
     this.renderer.domElement.addEventListener("pointermove", this.handlePointerMove);
+    this.renderer.domElement.addEventListener("pointerdown", this.handlePointerDown);
     this.renderer.domElement.addEventListener("pointerleave", this.handlePointerLeave);
     this.resize();
   }
 
+  private createSolidTexture(r: number, g: number, b: number, colorSpace: THREE.ColorSpace): THREE.DataTexture {
+    const texture = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1, THREE.RGBAFormat);
+    texture.colorSpace = colorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  private createDefaultMatcapTexture(size: number): THREE.DataTexture {
+    const resolution = Math.max(64, Math.round(size));
+    const data = new Uint8Array(resolution * resolution * 4);
+    const keyDir = new THREE.Vector3(-0.28, 0.92, 0.26).normalize();
+    const fillDir = new THREE.Vector3(0.52, 0.34, 0.78).normalize();
+    const keyHalf = new THREE.Vector3(keyDir.x, keyDir.y, keyDir.z + 1).normalize();
+    const fillHalf = new THREE.Vector3(fillDir.x, fillDir.y, fillDir.z + 1).normalize();
+    const toByte = (value: number): number => Math.round(THREE.MathUtils.clamp(value, 0, 1) * 255);
+    let ptr = 0;
+
+    // Procedural "gorilla-like" dark matcap: soft top highlight, dark bottom, subtle warm/cool tint.
+    for (let y = 0; y < resolution; y += 1) {
+      const ny = 1 - (y / (resolution - 1)) * 2;
+      for (let x = 0; x < resolution; x += 1) {
+        const nx = (x / (resolution - 1)) * 2 - 1;
+        const radius = Math.hypot(nx, ny);
+        const sphere = Math.max(0, 1 - radius * radius);
+        const nz = Math.sqrt(sphere);
+
+        const keyDot = Math.max(nx * keyDir.x + ny * keyDir.y + nz * keyDir.z, 0);
+        const fillDot = Math.max(nx * fillDir.x + ny * fillDir.y + nz * fillDir.z, 0);
+        const keySpec = Math.pow(Math.max(nx * keyHalf.x + ny * keyHalf.y + nz * keyHalf.z, 0), 42);
+        const fillSpec = Math.pow(Math.max(nx * fillHalf.x + ny * fillHalf.y + nz * fillHalf.z, 0), 24);
+
+        const ambient = 0.16 + (ny * 0.5 + 0.5) * 0.22;
+        const lit = ambient + keyDot * 0.62 + fillDot * 0.18 + keySpec * 0.55 + fillSpec * 0.08;
+        const bottomFade = Math.pow(THREE.MathUtils.clamp((-ny + 0.03) / 1.03, 0, 1), 1.42);
+        const edgeFade = Math.pow(THREE.MathUtils.clamp((radius - 0.55) / 0.45, 0, 1), 1.4);
+        const tonal = lit * (1 - 0.86 * bottomFade) * (1 - 0.65 * edgeFade);
+
+        const warmTint = Math.exp(-((nx + 0.86) * (nx + 0.86) * 6.0 + (ny + 0.22) * (ny + 0.22) * 3.2)) * 0.12;
+        const coolTint = Math.exp(-((nx - 0.60) * (nx - 0.60) * 7.0 + (ny - 0.05) * (ny - 0.05) * 4.0)) * 0.16;
+        const topBloom = Math.exp(-((nx + 0.05) * (nx + 0.05) * 4.2 + (ny - 0.75) * (ny - 0.75) * 14.0)) * 0.28;
+        const baseR = 0.10 + nz * 0.14;
+        const baseG = 0.11 + nz * 0.15;
+        const baseB = 0.13 + nz * 0.16;
+
+        let r = baseR * tonal + warmTint * 0.70 + coolTint * 0.04 + topBloom * 0.95;
+        let g = baseG * tonal + warmTint * 0.28 + coolTint * 0.18 + topBloom * 0.97;
+        let b = baseB * tonal + warmTint * 0.10 + coolTint * 0.65 + topBloom * 1.02;
+
+        if (sphere <= 0) {
+          const outside = Math.pow(THREE.MathUtils.clamp(1 - (radius - 1) * 7, 0, 1), 2.4) * 0.03;
+          r = outside;
+          g = outside;
+          b = outside;
+        }
+
+        data[ptr] = toByte(r);
+        data[ptr + 1] = toByte(g);
+        data[ptr + 2] = toByte(b);
+        data[ptr + 3] = 255;
+        ptr += 4;
+      }
+    }
+
+    const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
   private createGeometry(subdivisions: number): THREE.PlaneGeometry {
-    const clamped = Math.min(1600, Math.max(48, Math.round(subdivisions)));
+    const clamped = Math.min(1600, Math.max(512, Math.round(subdivisions)));
     return new THREE.PlaneGeometry(PLANE_WIDTH, PLANE_DEPTH, clamped, clamped);
   }
 
@@ -420,10 +729,15 @@ export class DisplacedPlaneScene {
     return new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE, 1, 1);
   }
 
+  private createBackgroundFloorGeometry(): THREE.PlaneGeometry {
+    return new THREE.PlaneGeometry(BACKGROUND_FLOOR_SIZE, BACKGROUND_FLOOR_SIZE, 1, 1);
+  }
+
   private applyNoiseUniforms(): void {
     const baseFreq = THREE.MathUtils.clamp(this.noiseParams.baseFreq, 0.05, 1.0);
     const latticeWarpFreq = THREE.MathUtils.clamp(this.noiseParams.latticeWarpFreq, 0.05, 1.0);
     const turboFreq = THREE.MathUtils.clamp(this.noiseParams.turboFreq, 0.05, 1.0);
+    const driftSpeed = THREE.MathUtils.clamp(this.noiseParams.driftSpeed, 0, 0.65);
     const outputMin = Math.min(this.noiseParams.outputMin, this.noiseParams.outputMax);
     const outputMax = Math.max(this.noiseParams.outputMin, this.noiseParams.outputMax);
 
@@ -440,8 +754,9 @@ export class DisplacedPlaneScene {
     this.uniforms.uTurboFreq.value = turboFreq;
     this.uniforms.uTurboAmp.value = this.noiseParams.turboAmp;
     this.uniforms.uRoughness.value = this.noiseParams.roughness;
-    this.uniforms.uAttenuation.value = this.noiseParams.attenuation;
+    this.uniforms.uAttenuation.value = THREE.MathUtils.clamp(this.noiseParams.attenuation, 0.05, 0.7);
     this.uniforms.uTurbulence.value = this.noiseParams.turbulence;
+    this.uniforms.uDriftSpeed.value = driftSpeed;
     this.uniforms.uOutputMin.value = outputMin;
     this.uniforms.uOutputMax.value = outputMax;
   }
@@ -454,11 +769,146 @@ export class DisplacedPlaneScene {
   }
 
   private applyInteractionUniforms(): void {
-    this.uniforms.uMouseRadius.value = this.interactionParams.mouseRadius;
-    this.uniforms.uEdgeFade.value = this.interactionParams.edgeFade;
-    this.uniforms.uEdgeRadius.value = this.interactionParams.edgeRadius;
-    this.uniforms.uEdgePower.value = this.interactionParams.edgePower;
-    this.uniforms.uDriftSpeed.value = this.interactionParams.driftSpeed;
+    this.uniforms.uMouseRadius.value = THREE.MathUtils.clamp(this.interactionParams.mouseRadius, 0.5, 0.6);
+    this.uniforms.uMouseStrength.value = THREE.MathUtils.clamp(this.interactionParams.mouseStrength, 0.2, 2.2);
+    this.uniforms.uMouseNoiseOffset.value = this.interactionParams.mouseNoiseOffset >= 0.5 ? 1 : 0;
+    this.uniforms.uEdgeFade.value = Math.max(0.1, this.interactionParams.edgeFade);
+    this.uniforms.uEdgeRadius.value = THREE.MathUtils.clamp(this.interactionParams.edgeRadius, 0.1, 0.5);
+    this.uniforms.uEdgePower.value = Math.max(0.9, this.interactionParams.edgePower);
+  }
+
+  private enforceCameraTargetBounds(): void {
+    if (this.cameraParams.centerLock >= 0.5) {
+      this.controls.target.copy(this.controlsCenter);
+      return;
+    }
+
+    const panRange = Math.max(0, this.cameraParams.panRange);
+    this.targetDelta.copy(this.controls.target).sub(this.controlsCenter);
+    this.targetDelta.y = THREE.MathUtils.clamp(this.targetDelta.y, -panRange, panRange);
+
+    const xzLength = Math.hypot(this.targetDelta.x, this.targetDelta.z);
+    if (xzLength > panRange && xzLength > 0.000001) {
+      const scale = panRange / xzLength;
+      this.targetDelta.x *= scale;
+      this.targetDelta.z *= scale;
+    }
+
+    this.controls.target.copy(this.controlsCenter).add(this.targetDelta);
+  }
+
+  private applyCameraParams(): void {
+    const fov = THREE.MathUtils.clamp(this.cameraParams.fov, 20, 100);
+    const minDistance = THREE.MathUtils.clamp(this.cameraParams.minDistance, 1, 80);
+    const maxDistance = THREE.MathUtils.clamp(this.cameraParams.maxDistance, minDistance + 0.1, 120);
+    const minPolarDeg = THREE.MathUtils.clamp(this.cameraParams.minPolarDeg, 0, 89);
+    const maxPolarDeg = THREE.MathUtils.clamp(this.cameraParams.maxPolarDeg, minPolarDeg, 89);
+
+    this.camera.fov = fov;
+    this.camera.updateProjectionMatrix();
+
+    this.controls.minDistance = minDistance;
+    this.controls.maxDistance = maxDistance;
+    this.controls.minPolarAngle = THREE.MathUtils.degToRad(minPolarDeg);
+    this.controls.maxPolarAngle = THREE.MathUtils.degToRad(maxPolarDeg);
+    this.controls.minAzimuthAngle = -Infinity;
+    this.controls.maxAzimuthAngle = Infinity;
+    this.controls.enablePan = this.cameraParams.centerLock < 0.5;
+    this.enforceCameraTargetBounds();
+  }
+
+  private applyMaterialUniforms(): void {
+    this.uniforms.uMaterialMode.value = this.materialMode === "matcap" ? 1 : 0;
+    if (this.uniforms.uUseMatcapMap.value < 0.5) {
+      this.uniforms.uMatcapMap.value = this.defaultMatcapTexture;
+      this.uniforms.uUseMatcapMap.value = 1;
+      this.updateMatcapTexelSize(this.defaultMatcapTexture);
+    }
+    this.uniforms.uMatDiffuse.value = this.materialParams.diffuse;
+    this.uniforms.uMatRoughness.value = this.materialParams.roughness;
+    this.uniforms.uMatMetalness.value = this.materialParams.metalness;
+    this.uniforms.uMatClearcoat.value = this.materialParams.clearcoat;
+    this.uniforms.uMatNormalStrength.value = this.materialParams.normalStrength;
+    this.uniforms.uMatcapBrightness.value = this.materialParams.matcapBrightness;
+    this.uniforms.uMatcapBlur.value = this.materialParams.matcapBlur;
+    this.uniforms.uMatcapContrast.value = this.materialParams.matcapContrast;
+    this.uniforms.uMatcapSaturation.value = this.materialParams.matcapSaturation;
+  }
+
+  private updateMatcapTexelSize(texture: THREE.Texture): void {
+    const image = texture.image as { width?: number; height?: number } | undefined;
+    const width = typeof image?.width === "number" && image.width > 0 ? image.width : 1;
+    const height = typeof image?.height === "number" && image.height > 0 ? image.height : 1;
+    this.uniforms.uMatcapTexelSize.value.set(1 / width, 1 / height);
+  }
+
+  private setMaterialMapTexture(slot: MaterialMapSlot, texture: THREE.Texture, enabled: number): void {
+    if (slot === "albedo") {
+      this.uniforms.uAlbedoMap.value = texture;
+      this.uniforms.uUseAlbedoMap.value = enabled;
+      return;
+    }
+    if (slot === "roughness") {
+      this.uniforms.uRoughnessMap.value = texture;
+      this.uniforms.uUseRoughnessMap.value = enabled;
+      return;
+    }
+    if (slot === "metalness") {
+      this.uniforms.uMetalnessMap.value = texture;
+      this.uniforms.uUseMetalnessMap.value = enabled;
+      return;
+    }
+    if (slot === "clearcoat") {
+      this.uniforms.uClearcoatMap.value = texture;
+      this.uniforms.uUseClearcoatMap.value = enabled;
+      return;
+    }
+    if (slot === "normal") {
+      this.uniforms.uNormalMap.value = texture;
+      this.uniforms.uUseNormalMap.value = enabled;
+      return;
+    }
+    this.uniforms.uMatcapMap.value = texture;
+    this.uniforms.uUseMatcapMap.value = enabled;
+    this.updateMatcapTexelSize(texture);
+  }
+
+  async setMaterialMap(slot: MaterialMapSlot, file: File | null): Promise<void> {
+    if (!file) {
+      const previous = this.mapTextures[slot];
+      if (previous) {
+        previous.dispose();
+        delete this.mapTextures[slot];
+      }
+      const fallback =
+        slot === "normal"
+          ? this.defaultNormalTexture
+          : slot === "albedo"
+            ? this.defaultAlbedoTexture
+            : slot === "matcap"
+              ? this.defaultMatcapTexture
+            : this.defaultScalarTexture;
+      this.setMaterialMapTexture(slot, fallback, slot === "matcap" ? 1 : 0);
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    try {
+      const texture = await this.textureLoader.loadAsync(url);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.colorSpace = slot === "albedo" || slot === "matcap" ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      texture.needsUpdate = true;
+
+      const previous = this.mapTextures[slot];
+      if (previous) {
+        previous.dispose();
+      }
+      this.mapTextures[slot] = texture;
+      this.setMaterialMapTexture(slot, texture, 1);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   private updateLightDirection(azimuthDeg: number, elevationDeg: number, out: THREE.Vector3): void {
@@ -493,13 +943,79 @@ export class DisplacedPlaneScene {
       this.shadingParams.baseColorG,
       this.shadingParams.baseColorB,
     );
-    this.uniforms.uCavitySlopeScale.value = this.shadingParams.cavitySlopeScale;
-    this.uniforms.uCavityCurvatureScale.value = this.shadingParams.cavityCurvatureScale;
-    this.uniforms.uCavityPower.value = this.shadingParams.cavityPower;
-    this.uniforms.uCavityStrength.value = this.shadingParams.cavityStrength;
-    this.uniforms.uCavityMax.value = this.shadingParams.cavityMax;
-    this.uniforms.uShadeMin.value = Math.min(this.shadingParams.shadeMin, this.shadingParams.shadeMax);
-    this.uniforms.uShadeMax.value = Math.max(this.shadingParams.shadeMin, this.shadingParams.shadeMax);
+  }
+
+  private applyAmbientOcclusionParams(): void {
+    const mode = this.ambientOcclusionParams.mode;
+    this.gtaoPass.enabled = mode === "gtao";
+    this.saoPass.enabled = mode === "sao";
+
+    if (mode === "gtao") {
+      const denoiseRadius = Math.max(2, this.ambientOcclusionParams.denoiseRadius * 1.35);
+      this.gtaoPass.blendIntensity = this.ambientOcclusionParams.intensity;
+      this.gtaoPass.updateGtaoMaterial({
+        radius: this.ambientOcclusionParams.radius,
+        thickness: this.ambientOcclusionParams.thickness,
+        distanceFallOff: this.ambientOcclusionParams.falloff,
+        samples: 32,
+      });
+      this.gtaoPass.updatePdMaterial({
+        radius: denoiseRadius,
+        lumaPhi: 18,
+        depthPhi: 4,
+        normalPhi: 8,
+        rings: 4,
+        samples: 32,
+        radiusExponent: 1.6,
+      });
+    }
+
+    if (mode === "sao") {
+      this.saoPass.params.saoIntensity = this.ambientOcclusionParams.intensity;
+      this.saoPass.params.saoKernelRadius = Math.max(1, this.ambientOcclusionParams.radius * 100);
+      this.saoPass.params.saoScale = this.ambientOcclusionParams.falloff;
+      this.saoPass.params.saoBias = Math.max(0, 1 - this.ambientOcclusionParams.thickness * 0.5);
+      this.saoPass.params.saoBlurRadius = Math.max(1, Math.round(this.ambientOcclusionParams.denoiseRadius));
+    }
+  }
+
+  private renderAODepthBuffer(): void {
+    const previousTarget = this.renderer.getRenderTarget();
+    const previousAutoClear = this.renderer.autoClear;
+    const previousClearAlpha = this.renderer.getClearAlpha();
+    this.renderer.getClearColor(this.clearColorScratch);
+
+    const materialColorWrite = this.material.colorWrite;
+    const materialDepthWrite = this.material.depthWrite;
+    const floorColorWrite = this.floorMaterial.colorWrite;
+    const floorDepthWrite = this.floorMaterial.depthWrite;
+    const backgroundFloorColorWrite = this.backgroundFloorMaterial.colorWrite;
+    const backgroundFloorDepthWrite = this.backgroundFloorMaterial.depthWrite;
+
+    this.material.colorWrite = false;
+    this.material.depthWrite = true;
+    this.floorMaterial.colorWrite = false;
+    this.floorMaterial.depthWrite = true;
+    this.backgroundFloorMaterial.colorWrite = false;
+    this.backgroundFloorMaterial.depthWrite = true;
+
+    try {
+      this.renderer.setRenderTarget(this.aoDepthTarget);
+      this.renderer.autoClear = true;
+      this.renderer.setClearColor(0x000000, 1);
+      this.renderer.clear(true, true, true);
+      this.renderer.render(this.scene, this.camera);
+    } finally {
+      this.material.colorWrite = materialColorWrite;
+      this.material.depthWrite = materialDepthWrite;
+      this.floorMaterial.colorWrite = floorColorWrite;
+      this.floorMaterial.depthWrite = floorDepthWrite;
+      this.backgroundFloorMaterial.colorWrite = backgroundFloorColorWrite;
+      this.backgroundFloorMaterial.depthWrite = backgroundFloorDepthWrite;
+      this.renderer.autoClear = previousAutoClear;
+      this.renderer.setRenderTarget(previousTarget);
+      this.renderer.setClearColor(this.clearColorScratch, previousClearAlpha);
+    }
   }
 
   setNoiseParam(key: keyof HoudiniNoiseParams, value: number): void {
@@ -517,9 +1033,34 @@ export class DisplacedPlaneScene {
     this.applyInteractionUniforms();
   }
 
+  setCameraParam(key: keyof CameraParams, value: number): void {
+    this.cameraParams[key] = value;
+    this.applyCameraParams();
+  }
+
+  setMaterialParam(key: keyof MaterialParams, value: number): void {
+    this.materialParams[key] = value;
+    this.applyMaterialUniforms();
+  }
+
+  setMaterialMode(mode: MaterialMode): void {
+    this.materialMode = mode;
+    this.applyMaterialUniforms();
+  }
+
+  setAmbientOcclusionParam(key: Exclude<keyof AmbientOcclusionParams, "mode">, value: number): void {
+    this.ambientOcclusionParams[key] = value;
+    this.applyAmbientOcclusionParams();
+  }
+
+  setAmbientOcclusionMode(mode: AmbientOcclusionMode): void {
+    this.ambientOcclusionParams.mode = mode;
+    this.applyAmbientOcclusionParams();
+  }
+
   setQualityParam(key: keyof QualityParams, value: number): void {
     if (key === "subdivisions") {
-      const next = THREE.MathUtils.clamp(Math.round(value), 48, 1600);
+      const next = THREE.MathUtils.clamp(Math.round(value), 512, 1600);
       if (next === this.qualityParams.subdivisions) {
         return;
       }
@@ -554,18 +1095,35 @@ export class DisplacedPlaneScene {
   render(deltaSeconds: number, elapsedSeconds: number): void {
     const smoothing = 1 - Math.exp(-deltaSeconds * 14);
     this.uniforms.uMouseUv.value.lerp(this.pointerUvTarget, smoothing);
-
-    const targetStrength = this.mouseStrengthTarget * this.interactionParams.mouseStrength;
-    this.mouseStrengthCurrent += (targetStrength - this.mouseStrengthCurrent) * smoothing;
+    this.mouseStrengthCurrent += (this.mouseStrengthTarget - this.mouseStrengthCurrent) * smoothing;
+    this.pointerMoveDirCurrent.lerp(this.pointerMoveDirTarget, smoothing);
+    this.uniforms.uMouseMoveDir.value.copy(this.pointerMoveDirCurrent);
+    if (this.pointerMoveDirTarget.lengthSq() > 0) {
+      this.pointerMoveDirTarget.multiplyScalar(Math.exp(-deltaSeconds * 8));
+      if (this.pointerMoveDirTarget.lengthSq() < 0.00000001) {
+        this.pointerMoveDirTarget.set(0, 0);
+      }
+    }
+    if (this.pulseAge >= 0) {
+      this.pulseAge += deltaSeconds;
+      if (this.pulseAge > 2.0) {
+        this.pulseAge = -1;
+      }
+    }
 
     this.uniforms.uTime.value = elapsedSeconds;
-    this.uniforms.uMouseStrength.value = this.mouseStrengthCurrent;
+    this.uniforms.uMouseHover.value = this.mouseStrengthCurrent;
+    this.uniforms.uPulseAge.value = this.pulseAge;
     this.uniforms.uLow.value = this.audioLow;
     this.uniforms.uMid.value = this.audioMid;
     this.uniforms.uHigh.value = this.audioHigh;
 
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+    this.enforceCameraTargetBounds();
+    if (this.ambientOcclusionParams.mode === "gtao") {
+      this.renderAODepthBuffer();
+    }
+    this.composer.render();
   }
 
   resize(): void {
@@ -575,20 +1133,39 @@ export class DisplacedPlaneScene {
 
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(width, height, false);
+    this.composer.setPixelRatio(dpr);
+    this.composer.setSize(width, height);
+    this.aoDepthTarget.setSize(Math.max(1, Math.floor(width * dpr)), Math.max(1, Math.floor(height * dpr)));
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
   }
 
   dispose(): void {
     this.renderer.domElement.removeEventListener("pointermove", this.handlePointerMove);
+    this.renderer.domElement.removeEventListener("pointerdown", this.handlePointerDown);
     this.renderer.domElement.removeEventListener("pointerleave", this.handlePointerLeave);
 
     this.controls.dispose();
+    this.backgroundFloorGeometry.dispose();
+    this.backgroundFloorMaterial.dispose();
     this.floorGeometry.dispose();
     this.floorMaterial.dispose();
     this.underlayGeometry.dispose();
     this.geometry.dispose();
     this.material.dispose();
+    this.renderPass.dispose();
+    this.gtaoPass.dispose();
+    this.saoPass.dispose();
+    this.aoDepthTarget.dispose();
+    this.aoDepthTexture.dispose();
+    this.composer.dispose();
+    for (const texture of Object.values(this.mapTextures)) {
+      texture?.dispose();
+    }
+    this.defaultAlbedoTexture.dispose();
+    this.defaultScalarTexture.dispose();
+    this.defaultNormalTexture.dispose();
+    this.defaultMatcapTexture.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

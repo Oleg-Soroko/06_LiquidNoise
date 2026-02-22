@@ -4,15 +4,25 @@ import { AudioInputController } from "./audio/AudioInputController";
 import { BandAnalyzer } from "./audio/BandAnalyzer";
 import { createControlPanel, type ControlPanelApi } from "./ui/controls";
 import {
+  DEFAULT_AMBIENT_OCCLUSION_PARAMS,
   DEFAULT_AUDIO_MAP_PARAMS,
+  DEFAULT_CAMERA_PARAMS,
   DEFAULT_INTERACTION_PARAMS,
+  DEFAULT_MATERIAL_MODE,
+  DEFAULT_MATERIAL_PARAMS,
   DEFAULT_NOISE_PARAMS,
   DEFAULT_QUALITY_PARAMS,
   DEFAULT_SHADING_PARAMS,
   DisplacedPlaneScene,
+  type AmbientOcclusionMode,
+  type AmbientOcclusionParams,
   type AudioMapParams,
+  type CameraParams,
   type HoudiniNoiseParams,
   type InteractionParams,
+  type MaterialMode,
+  type MaterialMapSlot,
+  type MaterialParams,
   type QualityParams,
   type ShadingParams,
 } from "./visual/DisplacedPlaneScene";
@@ -47,6 +57,10 @@ const noiseParams: HoudiniNoiseParams = { ...DEFAULT_NOISE_PARAMS };
 const audioMapParams: AudioMapParams = { ...DEFAULT_AUDIO_MAP_PARAMS };
 const interactionParams: InteractionParams = { ...DEFAULT_INTERACTION_PARAMS };
 const qualityParams: QualityParams = { ...DEFAULT_QUALITY_PARAMS };
+const cameraParams: CameraParams = { ...DEFAULT_CAMERA_PARAMS };
+let materialMode: MaterialMode = DEFAULT_MATERIAL_MODE;
+const materialParams: MaterialParams = { ...DEFAULT_MATERIAL_PARAMS };
+const ambientOcclusionParams: AmbientOcclusionParams = { ...DEFAULT_AMBIENT_OCCLUSION_PARAMS };
 const shadingParams: ShadingParams = { ...DEFAULT_SHADING_PARAMS };
 
 const audioElement = new Audio();
@@ -63,6 +77,10 @@ const scene = new DisplacedPlaneScene({
   audioMapParams,
   interactionParams,
   qualityParams,
+  cameraParams,
+  materialMode,
+  materialParams,
+  ambientOcclusionParams,
   shadingParams,
 });
 
@@ -74,6 +92,10 @@ controlPanel = createControlPanel(
     audioMapParams,
     interactionParams,
     qualityParams,
+    cameraParams,
+    materialMode,
+    materialParams,
+    ambientOcclusionParams,
     shadingParams,
   },
   {
@@ -147,6 +169,54 @@ controlPanel = createControlPanel(
     onQualityParamChange: (key, value): void => {
       qualityParams[key] = value;
       scene.setQualityParam(key, value);
+    },
+
+    onCameraParamChange: (key, value): void => {
+      cameraParams[key] = value;
+      scene.setCameraParam(key, value);
+    },
+
+    onMaterialParamChange: (key, value): void => {
+      materialParams[key] = value;
+      scene.setMaterialParam(key, value);
+    },
+
+    onMaterialModeChange: (mode: MaterialMode): void => {
+      materialMode = mode;
+      scene.setMaterialMode(mode);
+    },
+
+    onMaterialMapSelected: async (slot: MaterialMapSlot, file: File | null): Promise<void> => {
+      const mapLabel: Record<MaterialMapSlot, string> = {
+        albedo: "Albedo",
+        roughness: "Roughness",
+        metalness: "Metalness",
+        clearcoat: "Clearcoat",
+        normal: "Normal",
+        matcap: "Matcap",
+      };
+
+      try {
+        if (file) {
+          controlPanel.setStatus(`Loading ${mapLabel[slot]} map...`);
+        } else {
+          controlPanel.setStatus(`Clearing ${mapLabel[slot]} map...`);
+        }
+        await scene.setMaterialMap(slot, file);
+        controlPanel.setStatus(file ? `${mapLabel[slot]} map loaded.` : `${mapLabel[slot]} map cleared.`);
+      } catch (error) {
+        controlPanel.setStatus(`${mapLabel[slot]} map failed: ${formatError(error)}`, "error");
+      }
+    },
+
+    onAmbientOcclusionModeChange: (mode: AmbientOcclusionMode): void => {
+      ambientOcclusionParams.mode = mode;
+      scene.setAmbientOcclusionMode(mode);
+    },
+
+    onAmbientOcclusionParamChange: (key, value): void => {
+      ambientOcclusionParams[key] = value;
+      scene.setAmbientOcclusionParam(key, value);
     },
 
     onShadingParamChange: (key, value): void => {

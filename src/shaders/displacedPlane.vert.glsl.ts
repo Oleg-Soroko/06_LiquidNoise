@@ -31,6 +31,10 @@ uniform float uGlobalGain;
 uniform vec2 uMouseUv;
 uniform float uMouseRadius;
 uniform float uMouseStrength;
+uniform float uMouseHover;
+uniform vec2 uMouseMoveDir;
+uniform float uMouseNoiseOffset;
+uniform float uPulseAge;
 uniform float uEdgeFade;
 uniform float uEdgeRadius;
 uniform float uEdgePower;
@@ -140,7 +144,7 @@ float alligatorTurbulence(vec3 p) {
   float freq = max(0.0001, uTurboFreq);
   float norm = 0.0;
   float roughPow = mix(0.9, 3.5, clamp(uRoughness, 0.0, 1.0));
-  float atten = clamp(uAttenuation, 0.05, 0.98);
+  float atten = clamp(uAttenuation, 0.05, 0.7);
 
   if (amp <= 0.000001) {
     return 0.0;
@@ -162,10 +166,11 @@ float alligatorTurbulence(vec3 p) {
   return sum / norm;
 }
 
-float edgePin(vec2 uv) {
-  float radius = clamp(uEdgeRadius, 0.01, 0.71);
-  float fade = max(0.0005, uEdgeFade);
-  float power = max(0.01, uEdgePower);
+float edgePin(vec2 uv, float audioEdge) {
+  float radius = clamp(uEdgeRadius, 0.1, 0.5);
+  float fade = max(0.1, uEdgeFade);
+  float basePower = max(0.9, uEdgePower);
+  float power = clamp(basePower + audioEdge * (4.0 - basePower), 0.9, 4.0);
   float distToCenter = distance(uv, vec2(0.5));
   float pin = 1.0 - smoothstep(radius - fade, radius, distToCenter);
   return pow(clamp(pin, 0.0, 1.0), power);
@@ -176,6 +181,15 @@ void main() {
 
   vec3 basePos = vec3(position.xy, uTime * uDriftSpeed) + uBaseOffset;
   vec3 simplexInput = basePos * max(0.0001, uBaseFreq);
+  if (uMouseNoiseOffset > 0.5) {
+    float moveLen = length(uMouseMoveDir);
+    if (moveLen > 0.0001) {
+      float distToMouseForNoise = distance(vUv, uMouseUv);
+      float noiseMask = 1.0 - smoothstep(0.0, max(0.0001, uMouseRadius * 1.3), distToMouseForNoise);
+      vec2 moveDir = uMouseMoveDir / moveLen;
+      simplexInput.xy += moveDir * (noiseMask * 0.12);
+    }
+  }
   vec3 simplexWarp = warpVector(simplexInput * max(0.0001, uLatticeWarpFreq)) * uLatticeWarp;
   vec3 simplexWarped = simplexInput + simplexWarp;
 
@@ -185,6 +199,11 @@ void main() {
   float finalRemap = mix(uOutputMin, uOutputMax, alligator01);
 
   float macroAudio = 1.0 + (uLow * uLowGain + uMid * uMidGain) * uGlobalGain;
+  float edgeAudio = clamp(
+    (uLow * uLowGain + uMid * uMidGain + uHigh * uHighGain) * uGlobalGain * 0.35,
+    0.0,
+    1.0
+  );
   float fine = snoise(
     simplexWarped * 3.35 +
     vec3(0.0, 0.0, uTime * (uDriftSpeed * 1.9 + 0.03))
@@ -192,10 +211,21 @@ void main() {
   float audioShape = finalRemap * macroAudio + fine * uHigh * uHighGain * uGlobalGain * 0.45;
 
   float distToMouse = distance(vUv, uMouseUv);
-  float mouseFalloff = 1.0 - smoothstep(0.0, max(0.0001, uMouseRadius), distToMouse);
-  float mouseTerm = mouseFalloff * uMouseStrength;
+  float radius = max(0.5, uMouseRadius);
+  float mouseFalloff = 1.0 - smoothstep(0.0, radius, distToMouse);
+  float hoverTerm = mouseFalloff * uMouseHover * uMouseStrength;
 
-  float height = edgePin(vUv) * ((audioShape * uFinalAmp) + mouseTerm);
+  float pulseTerm = 0.0;
+  if (uPulseAge >= 0.0) {
+    float normalizedDist = distToMouse / radius;
+    float spatialEnvelope = exp(-normalizedDist * 2.0);
+    float temporalEnvelope = exp(-uPulseAge * 3.2);
+    float phase = normalizedDist * 14.0 - uPulseAge * 16.0;
+    pulseTerm = sin(phase) * spatialEnvelope * temporalEnvelope * uMouseStrength;
+  }
+  float mouseTerm = hoverTerm + pulseTerm;
+
+  float height = edgePin(vUv, edgeAudio) * ((audioShape * uFinalAmp) + mouseTerm);
   if (uIsFloor > 0.5) {
     height = 0.0;
   }

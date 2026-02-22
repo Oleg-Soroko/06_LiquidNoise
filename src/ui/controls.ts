@@ -1,7 +1,13 @@
 import type {
+  AmbientOcclusionMode,
+  AmbientOcclusionParams,
   AudioMapParams,
+  CameraParams,
   HoudiniNoiseParams,
   InteractionParams,
+  MaterialMode,
+  MaterialMapSlot,
+  MaterialParams,
   QualityParams,
   ShadingParams,
 } from "../visual/DisplacedPlaneScene";
@@ -11,6 +17,10 @@ export interface ControlPanelState {
   audioMapParams: AudioMapParams;
   interactionParams: InteractionParams;
   qualityParams: QualityParams;
+  cameraParams: CameraParams;
+  materialMode: MaterialMode;
+  materialParams: MaterialParams;
+  ambientOcclusionParams: AmbientOcclusionParams;
   shadingParams: ShadingParams;
 }
 
@@ -22,6 +32,12 @@ export interface ControlCallbacks {
   onAudioMapParamChange(key: keyof AudioMapParams, value: number): void;
   onInteractionParamChange(key: keyof InteractionParams, value: number): void;
   onQualityParamChange(key: keyof QualityParams, value: number): void;
+  onCameraParamChange(key: keyof CameraParams, value: number): void;
+  onMaterialModeChange(mode: MaterialMode): void;
+  onMaterialParamChange(key: keyof MaterialParams, value: number): void;
+  onMaterialMapSelected(slot: MaterialMapSlot, file: File | null): Promise<void> | void;
+  onAmbientOcclusionModeChange(mode: AmbientOcclusionMode): void;
+  onAmbientOcclusionParamChange(key: Exclude<keyof AmbientOcclusionParams, "mode">, value: number): void;
   onShadingParamChange(key: keyof ShadingParams, value: number): void;
 }
 
@@ -108,6 +124,11 @@ export function createControlPanel(
   const audioMapParams: AudioMapParams = { ...initialState.audioMapParams };
   const interactionParams: InteractionParams = { ...initialState.interactionParams };
   const qualityParams: QualityParams = { ...initialState.qualityParams };
+  const cameraParams: CameraParams = { ...initialState.cameraParams };
+  let materialMode: MaterialMode = initialState.materialMode;
+  const materialParams: MaterialParams = { ...initialState.materialParams };
+  let ambientOcclusionMode: AmbientOcclusionMode = initialState.ambientOcclusionParams.mode;
+  const ambientOcclusionParams: AmbientOcclusionParams = { ...initialState.ambientOcclusionParams };
   const shadingParams: ShadingParams = { ...initialState.shadingParams };
 
   const cleanup: Array<() => void> = [];
@@ -191,9 +212,15 @@ export function createControlPanel(
 
     const input = document.createElement("input");
     input.type = "checkbox";
+    input.className = "checkbox-input";
     input.checked = Number(state[key]) > 0.5;
 
+    const toggle = document.createElement("span");
+    toggle.className = "checkbox-toggle";
+    toggle.setAttribute("aria-hidden", "true");
+
     const text = document.createElement("span");
+    text.className = "checkbox-label";
     text.textContent = labelText;
 
     const onChange = (): void => {
@@ -206,9 +233,206 @@ export function createControlPanel(
     cleanup.push(() => input.removeEventListener("change", onChange));
 
     row.appendChild(input);
+    row.appendChild(toggle);
     row.appendChild(text);
     body.appendChild(row);
   };
+
+  const toHexChannel = (value: number): string => {
+    const channel = Math.round(Math.max(0, Math.min(1, value)) * 255);
+    return channel.toString(16).padStart(2, "0");
+  };
+
+  const toHexColor = (r: number, g: number, b: number): string => {
+    return `#${toHexChannel(r)}${toHexChannel(g)}${toHexChannel(b)}`;
+  };
+
+  const fromHexColor = (hex: string): { r: number; g: number; b: number } => {
+    const normalized = hex.startsWith("#") ? hex.slice(1) : hex;
+    if (normalized.length !== 6) {
+      return { r: 1, g: 1, b: 1 };
+    }
+    const r = Number.parseInt(normalized.slice(0, 2), 16);
+    const g = Number.parseInt(normalized.slice(2, 4), 16);
+    const b = Number.parseInt(normalized.slice(4, 6), 16);
+    return {
+      r: Number.isFinite(r) ? r / 255 : 1,
+      g: Number.isFinite(g) ? g / 255 : 1,
+      b: Number.isFinite(b) ? b / 255 : 1,
+    };
+  };
+
+  const bindColor = (
+    body: HTMLElement,
+    labelText: string,
+    color: { r: number; g: number; b: number },
+    onValue: (next: { r: number; g: number; b: number }) => void,
+  ): void => {
+    const row = document.createElement("div");
+    row.className = "control-row";
+
+    const label = document.createElement("label");
+    label.className = "control-label";
+    label.textContent = labelText;
+
+    const input = document.createElement("input");
+    input.type = "color";
+    input.className = "control-color";
+    input.value = toHexColor(color.r, color.g, color.b);
+
+    const onInput = (): void => {
+      onValue(fromHexColor(input.value));
+    };
+
+    input.addEventListener("input", onInput);
+    cleanup.push(() => input.removeEventListener("input", onInput));
+
+    row.appendChild(label);
+    row.appendChild(input);
+    body.appendChild(row);
+  };
+
+  const bindTextureInput = (
+    body: HTMLElement,
+    labelText: string,
+    slot: MaterialMapSlot,
+  ): void => {
+    const row = document.createElement("div");
+    row.className = "control-row";
+
+    const label = document.createElement("label");
+    label.className = "control-label";
+    label.textContent = labelText;
+
+    const controls = document.createElement("div");
+    controls.className = "texture-input-row";
+
+    const fileButton = document.createElement("label");
+    fileButton.className = "file-button texture-file-button";
+
+    const fileButtonText = document.createElement("span");
+    fileButtonText.textContent = "Choose File";
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+
+    const filename = document.createElement("span");
+    filename.className = "texture-file-name";
+    filename.textContent = slot === "matcap" ? "Built-in default" : "No file chosen";
+
+    const clearButton = document.createElement("button");
+    clearButton.type = "button";
+    clearButton.className = "texture-clear-button";
+    clearButton.textContent = "Clear";
+
+    const onFileChange = (): void => {
+      const file = input.files?.[0] ?? null;
+      if (!file) {
+        return;
+      }
+      filename.textContent = file.name;
+      void callbacks.onMaterialMapSelected(slot, file);
+      input.value = "";
+    };
+
+    const onClearClick = (): void => {
+      void callbacks.onMaterialMapSelected(slot, null);
+      filename.textContent = slot === "matcap" ? "Built-in default" : "No file chosen";
+      input.value = "";
+    };
+
+    input.addEventListener("change", onFileChange);
+    clearButton.addEventListener("click", onClearClick);
+    cleanup.push(() => input.removeEventListener("change", onFileChange));
+    cleanup.push(() => clearButton.removeEventListener("click", onClearClick));
+
+    fileButton.appendChild(input);
+    fileButton.appendChild(fileButtonText);
+    controls.appendChild(fileButton);
+    controls.appendChild(filename);
+    controls.appendChild(clearButton);
+    row.appendChild(label);
+    row.appendChild(controls);
+    body.appendChild(row);
+  };
+
+  const bindSelect = <T extends string>(
+    body: HTMLElement,
+    labelText: string,
+    options: Array<{ label: string; value: T }>,
+    initialValue: T,
+    onValue: (value: T) => void,
+  ): void => {
+    const row = document.createElement("div");
+    row.className = "control-row";
+
+    const label = document.createElement("label");
+    label.className = "control-label";
+    label.textContent = labelText;
+
+    const select = document.createElement("select");
+    select.className = "control-select";
+    for (const optionData of options) {
+      const option = document.createElement("option");
+      option.value = optionData.value;
+      option.textContent = optionData.label;
+      option.selected = optionData.value === initialValue;
+      select.appendChild(option);
+    }
+
+    const onChange = (): void => {
+      onValue(select.value as T);
+    };
+    select.addEventListener("change", onChange);
+    cleanup.push(() => select.removeEventListener("change", onChange));
+
+    row.appendChild(label);
+    row.appendChild(select);
+    body.appendChild(row);
+  };
+
+  type TabKey = "noise" | "audio" | "shader" | "interation" | "camera";
+  const tabsNav = document.createElement("div");
+  tabsNav.className = "tabs-nav";
+  const tabsPanels = document.createElement("div");
+  tabsPanels.className = "tabs-panels";
+
+  const tabButtons = {} as Record<TabKey, HTMLButtonElement>;
+  const tabPanels = {} as Record<TabKey, HTMLDivElement>;
+
+  const setActiveTab = (activeKey: TabKey): void => {
+    for (const key of Object.keys(tabButtons) as TabKey[]) {
+      const isActive = key === activeKey;
+      tabButtons[key].dataset.active = isActive ? "true" : "false";
+      tabPanels[key].hidden = !isActive;
+    }
+  };
+
+  const createTab = (key: TabKey, labelText: string): void => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tab-button";
+    button.textContent = labelText;
+
+    const panel = document.createElement("div");
+    panel.className = "tab-panel";
+
+    const onClick = (): void => setActiveTab(key);
+    button.addEventListener("click", onClick);
+    cleanup.push(() => button.removeEventListener("click", onClick));
+
+    tabButtons[key] = button;
+    tabPanels[key] = panel;
+    tabsNav.appendChild(button);
+    tabsPanels.appendChild(panel);
+  };
+
+  createTab("noise", "Noise");
+  createTab("audio", "Audio");
+  createTab("shader", "Shader");
+  createTab("interation", "Interation");
+  createTab("camera", "Camera");
 
   const unifiedFolder = createFolder("Unified Noise", true);
   const unifiedBody = requireElement<HTMLDivElement>(unifiedFolder, ".folder-body");
@@ -216,20 +440,6 @@ export function createControlPanel(
     label: "Base Frequency",
     min: 0.05,
     max: 1.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "baseOffsetX", {
-    label: "Offset X",
-    min: -8,
-    max: 8,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "baseOffsetY", {
-    label: "Offset Y",
-    min: -8,
-    max: 8,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
@@ -276,6 +486,28 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
+  bindRange(unifiedBody, noiseParams, "driftSpeed", {
+    label: "Drift Speed",
+    min: 0,
+    max: 0.65,
+    step: 0.001,
+    precision: 3,
+  }, callbacks.onNoiseParamChange);
+  bindRange(unifiedBody, qualityParams, "subdivisions", {
+    label: "Subdivisions",
+    min: 512,
+    max: 1600,
+    step: 1,
+    precision: 0,
+    changeOnly: true,
+  }, callbacks.onQualityParamChange);
+  bindRange(unifiedBody, qualityParams, "pixelRatioMax", {
+    label: "Pixel Ratio Max",
+    min: 1,
+    max: 2,
+    step: 0.05,
+    precision: 2,
+  }, callbacks.onQualityParamChange);
 
   const turboFolder = createFolder("Turbo Noise", true);
   const turboBody = requireElement<HTMLDivElement>(turboFolder, ".folder-body");
@@ -303,7 +535,7 @@ export function createControlPanel(
   bindRange(turboBody, noiseParams, "attenuation", {
     label: "Attenuation",
     min: 0.05,
-    max: 0.98,
+    max: 0.7,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
@@ -364,21 +596,28 @@ export function createControlPanel(
   const interactionBody = requireElement<HTMLDivElement>(interactionFolder, ".folder-body");
   bindRange(interactionBody, interactionParams, "mouseRadius", {
     label: "Mouse Radius",
-    min: 0.02,
+    min: 0.5,
     max: 0.6,
     step: 0.005,
     precision: 3,
   }, callbacks.onInteractionParamChange);
   bindRange(interactionBody, interactionParams, "mouseStrength", {
     label: "Mouse Strength",
-    min: 0,
-    max: 4,
+    min: 0.2,
+    max: 2.2,
     step: 0.01,
     precision: 2,
   }, callbacks.onInteractionParamChange);
+  bindCheckbox(
+    interactionBody,
+    interactionParams,
+    "mouseNoiseOffset",
+    "Mouse Noise Offset",
+    callbacks.onInteractionParamChange,
+  );
   bindRange(interactionBody, interactionParams, "edgeFade", {
     label: "Edge Fade",
-    min: 0.005,
+    min: 0.1,
     max: 0.5,
     step: 0.001,
     precision: 3,
@@ -386,27 +625,221 @@ export function createControlPanel(
   bindRange(interactionBody, interactionParams, "edgeRadius", {
     label: "Edge Radius",
     min: 0.1,
-    max: 0.71,
+    max: 0.5,
     step: 0.001,
     precision: 3,
   }, callbacks.onInteractionParamChange);
   bindRange(interactionBody, interactionParams, "edgePower", {
     label: "Edge Power",
-    min: 0.1,
+    min: 0.9,
     max: 4,
     step: 0.01,
     precision: 2,
   }, callbacks.onInteractionParamChange);
-  bindRange(interactionBody, interactionParams, "driftSpeed", {
-    label: "Drift Speed",
-    min: 0,
-    max: 0.65,
-    step: 0.001,
-    precision: 3,
-  }, callbacks.onInteractionParamChange);
 
-  const shadingFolder = createFolder("Shader / Lighting", true);
+  const cameraFolder = createFolder("Camera", true);
+  const cameraBody = requireElement<HTMLDivElement>(cameraFolder, ".folder-body");
+  bindRange(cameraBody, cameraParams, "fov", {
+    label: "FOV",
+    min: 20,
+    max: 100,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onCameraParamChange);
+  bindRange(cameraBody, cameraParams, "minDistance", {
+    label: "Zoom Min",
+    min: 1,
+    max: 80,
+    step: 0.1,
+    precision: 1,
+  }, callbacks.onCameraParamChange);
+  bindRange(cameraBody, cameraParams, "maxDistance", {
+    label: "Zoom Max",
+    min: 1,
+    max: 120,
+    step: 0.1,
+    precision: 1,
+  }, callbacks.onCameraParamChange);
+  bindRange(cameraBody, cameraParams, "minPolarDeg", {
+    label: "Min Polar",
+    min: 0,
+    max: 89,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onCameraParamChange);
+  bindRange(cameraBody, cameraParams, "maxPolarDeg", {
+    label: "Max Polar",
+    min: 0,
+    max: 89,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onCameraParamChange);
+  bindCheckbox(cameraBody, cameraParams, "centerLock", "Center Lock", callbacks.onCameraParamChange);
+  bindRange(cameraBody, cameraParams, "panRange", {
+    label: "Pan Range",
+    min: 0,
+    max: 10,
+    step: 0.1,
+    precision: 1,
+  }, callbacks.onCameraParamChange);
+
+  const materialFolder = createFolder("Material", true);
+  const materialBody = requireElement<HTMLDivElement>(materialFolder, ".folder-body");
+  const pbrMaterialBody = document.createElement("div");
+  pbrMaterialBody.className = "mode-group";
+  const matcapMaterialBody = document.createElement("div");
+  matcapMaterialBody.className = "mode-group";
+
+  const updateMaterialModeVisibility = (): void => {
+    pbrMaterialBody.hidden = materialMode !== "pbr";
+    matcapMaterialBody.hidden = materialMode !== "matcap";
+  };
+
+  bindSelect<MaterialMode>(
+    materialBody,
+    "Mode",
+    [
+      { label: "PBR", value: "pbr" },
+      { label: "Matcap", value: "matcap" },
+    ],
+    materialMode,
+    (value): void => {
+      materialMode = value;
+      callbacks.onMaterialModeChange(value);
+      updateMaterialModeVisibility();
+    },
+  );
+
+  bindColor(
+    pbrMaterialBody,
+    "PBR Color",
+    {
+      r: shadingParams.baseColorR,
+      g: shadingParams.baseColorG,
+      b: shadingParams.baseColorB,
+    },
+    (next): void => {
+      shadingParams.baseColorR = next.r;
+      shadingParams.baseColorG = next.g;
+      shadingParams.baseColorB = next.b;
+      callbacks.onShadingParamChange("baseColorR", next.r);
+      callbacks.onShadingParamChange("baseColorG", next.g);
+      callbacks.onShadingParamChange("baseColorB", next.b);
+    },
+  );
+
+  bindRange(pbrMaterialBody, materialParams, "diffuse", {
+    label: "Diffuse",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(pbrMaterialBody, materialParams, "roughness", {
+    label: "Roughness",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(pbrMaterialBody, materialParams, "metalness", {
+    label: "Metalness",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+
+  bindRange(matcapMaterialBody, materialParams, "matcapBrightness", {
+    label: "Matcap Brightness",
+    min: 0,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "matcapBlur", {
+    label: "Matcap Blur",
+    min: 0,
+    max: 4,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "matcapContrast", {
+    label: "Matcap Contrast",
+    min: 0,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "matcapSaturation", {
+    label: "Matcap Saturation",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindTextureInput(matcapMaterialBody, "Matcap Map", "matcap");
+
+  materialBody.appendChild(pbrMaterialBody);
+  materialBody.appendChild(matcapMaterialBody);
+  updateMaterialModeVisibility();
+
+  const aoFolder = createFolder("AO", true);
+  const aoBody = requireElement<HTMLDivElement>(aoFolder, ".folder-body");
+  const shadingFolder = createFolder("Lighting", true);
   const shadingBody = requireElement<HTMLDivElement>(shadingFolder, ".folder-body");
+  bindSelect<AmbientOcclusionMode>(
+    aoBody,
+    "AO Mode",
+    [
+      { label: "None", value: "none" },
+      { label: "GTAO", value: "gtao" },
+      { label: "SAO", value: "sao" },
+    ],
+    ambientOcclusionMode,
+    (value): void => {
+      ambientOcclusionMode = value;
+      callbacks.onAmbientOcclusionModeChange(value);
+    },
+  );
+  bindRange(aoBody, ambientOcclusionParams, "intensity", {
+    label: "AO Intensity",
+    min: 0,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAmbientOcclusionParamChange);
+  bindRange(aoBody, ambientOcclusionParams, "radius", {
+    label: "AO Radius",
+    min: 0.01,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAmbientOcclusionParamChange);
+  bindRange(aoBody, ambientOcclusionParams, "thickness", {
+    label: "AO Thickness",
+    min: 0,
+    max: 4,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAmbientOcclusionParamChange);
+  bindRange(aoBody, ambientOcclusionParams, "falloff", {
+    label: "AO Falloff",
+    min: 0.1,
+    max: 4,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAmbientOcclusionParamChange);
+  bindRange(aoBody, ambientOcclusionParams, "denoiseRadius", {
+    label: "AO Denoise",
+    min: 1,
+    max: 24,
+    step: 1,
+    precision: 0,
+  }, callbacks.onAmbientOcclusionParamChange);
   bindRange(shadingBody, shadingParams, "keyAzimuth", {
     label: "Key Azimuth",
     min: -180,
@@ -467,101 +900,18 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "baseColorR", {
-    label: "Base Color R",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "baseColorG", {
-    label: "Base Color G",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "baseColorB", {
-    label: "Base Color B",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "cavitySlopeScale", {
-    label: "Cavity Slope",
-    min: 0,
-    max: 3,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "cavityCurvatureScale", {
-    label: "Cavity Curvature",
-    min: 0,
-    max: 3,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "cavityPower", {
-    label: "Cavity Power",
-    min: 0.1,
-    max: 2.5,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "cavityStrength", {
-    label: "Cavity Strength",
-    min: 0,
-    max: 2.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "cavityMax", {
-    label: "Cavity Max",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "shadeMin", {
-    label: "Shade Min",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
-  bindRange(shadingBody, shadingParams, "shadeMax", {
-    label: "Shade Max",
-    min: 0,
-    max: 1,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onShadingParamChange);
+  tabPanels.noise.appendChild(unifiedFolder);
+  tabPanels.noise.appendChild(turboFolder);
+  tabPanels.audio.appendChild(audioFolder);
+  tabPanels.shader.appendChild(materialFolder);
+  tabPanels.shader.appendChild(aoFolder);
+  tabPanels.shader.appendChild(shadingFolder);
+  tabPanels.interation.appendChild(interactionFolder);
+  tabPanels.camera.appendChild(cameraFolder);
 
-  const qualityFolder = createFolder("Quality / Render", true);
-  const qualityBody = requireElement<HTMLDivElement>(qualityFolder, ".folder-body");
-  bindRange(qualityBody, qualityParams, "subdivisions", {
-    label: "Subdivisions",
-    min: 48,
-    max: 1600,
-    step: 1,
-    precision: 0,
-    changeOnly: true,
-  }, callbacks.onQualityParamChange);
-  bindRange(qualityBody, qualityParams, "pixelRatioMax", {
-    label: "Pixel Ratio Max",
-    min: 1,
-    max: 2,
-    step: 0.05,
-    precision: 2,
-  }, callbacks.onQualityParamChange);
-
-  foldersRoot.appendChild(unifiedFolder);
-  foldersRoot.appendChild(turboFolder);
-  foldersRoot.appendChild(audioFolder);
-  foldersRoot.appendChild(interactionFolder);
-  foldersRoot.appendChild(shadingFolder);
-  foldersRoot.appendChild(qualityFolder);
+  foldersRoot.appendChild(tabsNav);
+  foldersRoot.appendChild(tabsPanels);
+  setActiveTab("noise");
 
   const onFileChange = async (): Promise<void> => {
     const selected = fileInput.files?.[0];
