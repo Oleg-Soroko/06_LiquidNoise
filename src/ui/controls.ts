@@ -94,20 +94,22 @@ export function createControlPanel(
 ): ControlPanelApi {
   root.innerHTML = `
     <section class="panel">
-      <h1 class="title">Resonance Forge</h1>
-      <p class="subtitle">Houdini-style displaced plane, driven by audio bands.</p>
-      <div class="action-row">
-        <label class="file-button">
-          <input id="audio-file-input" type="file" accept="audio/*" />
-          <span>Load Audio</span>
-        </label>
-        <button id="mic-toggle-btn" type="button">Use Microphone</button>
-        <button id="play-toggle-btn" type="button" disabled>Play</button>
+      <div class="panel-head">
+        <h1 class="title">AFTER FORM NOISE</h1>
+        <div class="action-row">
+          <label class="file-button">
+            <input id="audio-file-input" type="file" accept="audio/*" />
+            <span>Load Audio</span>
+          </label>
+          <button id="mic-toggle-btn" type="button">Use Microphone</button>
+          <button id="play-toggle-btn" type="button" disabled>Play</button>
+        </div>
+        <div class="meter">
+          <div id="energy-fill" class="meter-fill"></div>
+        </div>
+        <p id="status-line" class="status">Idle. Load a file or enable your microphone.</p>
+        <div id="tabs-nav-slot" class="tabs-nav-slot"></div>
       </div>
-      <div class="meter">
-        <div id="energy-fill" class="meter-fill"></div>
-      </div>
-      <p id="status-line" class="status">Idle. Load a file or enable your microphone.</p>
       <div id="folders-root" class="folders-root"></div>
     </section>
     <div class="hint">Orbit: left drag | Pan: right drag | Zoom: wheel</div>
@@ -118,7 +120,18 @@ export function createControlPanel(
   const playButton = requireElement<HTMLButtonElement>(root, "#play-toggle-btn");
   const energyFill = requireElement<HTMLDivElement>(root, "#energy-fill");
   const statusLine = requireElement<HTMLParagraphElement>(root, "#status-line");
+  const tabsNavSlot = requireElement<HTMLDivElement>(root, "#tabs-nav-slot");
   const foldersRoot = requireElement<HTMLDivElement>(root, "#folders-root");
+  const panelElement = requireElement<HTMLElement>(root, ".panel");
+  const panelHeadElement = requireElement<HTMLElement>(root, ".panel-head");
+  const panelScrollbar = document.createElement("div");
+  panelScrollbar.className = "panel-scrollbar";
+  panelScrollbar.setAttribute("aria-hidden", "true");
+  panelScrollbar.dataset.hidden = "true";
+  const panelScrollbarThumb = document.createElement("div");
+  panelScrollbarThumb.className = "panel-scrollbar-thumb";
+  panelScrollbar.appendChild(panelScrollbarThumb);
+  panelElement.appendChild(panelScrollbar);
 
   const noiseParams: HoudiniNoiseParams = { ...initialState.noiseParams };
   const audioMapParams: AudioMapParams = { ...initialState.audioMapParams };
@@ -132,6 +145,21 @@ export function createControlPanel(
   const shadingParams: ShadingParams = { ...initialState.shadingParams };
 
   const cleanup: Array<() => void> = [];
+
+  type UiDepthMode = "soft" | "medium" | "deep";
+  const normalizeUiDepth = (value: string | undefined): UiDepthMode => {
+    if (value === "soft" || value === "deep" || value === "medium") {
+      return value;
+    }
+    return "medium";
+  };
+  const uiDepthState = {
+    value: normalizeUiDepth(root.dataset.uiDepth),
+  };
+  const setUiDepth = (mode: UiDepthMode): void => {
+    uiDepthState.value = mode;
+    root.dataset.uiDepth = mode;
+  };
 
   let micBusy = false;
   let playBusy = false;
@@ -166,6 +194,16 @@ export function createControlPanel(
     input.step = String(spec.step);
     input.value = String(state[key]);
 
+    const setRangeProgress = (): void => {
+      const min = Number.parseFloat(input.min);
+      const max = Number.parseFloat(input.max);
+      const current = Number.parseFloat(input.value);
+      const span = max - min;
+      const progress = span > 0 ? (current - min) / span : 0;
+      const clamped = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
+      input.style.setProperty("--range-progress", `${(clamped * 100).toFixed(2)}%`);
+    };
+
     const setOutput = (value: number): void => {
       output.textContent = formatValue(value, spec.precision, spec.suffix);
     };
@@ -174,6 +212,7 @@ export function createControlPanel(
       const value = Number(input.value);
       state[key] = value as T[K];
       setOutput(value);
+      setRangeProgress();
       if (notify) {
         onValue(key, value);
       }
@@ -189,6 +228,7 @@ export function createControlPanel(
     };
 
     setOutput(Number(input.value));
+    setRangeProgress();
     input.addEventListener("input", onInput);
     input.addEventListener("change", onChange);
     cleanup.push(() => input.removeEventListener("input", onInput));
@@ -245,6 +285,34 @@ export function createControlPanel(
 
   const toHexColor = (r: number, g: number, b: number): string => {
     return `#${toHexChannel(r)}${toHexChannel(g)}${toHexChannel(b)}`;
+  };
+
+  const normalizeHexColor = (value: string, fallback: string): string => {
+    const trimmed = value.trim().toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(trimmed)) {
+      return trimmed;
+    }
+    if (/^#[0-9a-f]{3}$/.test(trimmed)) {
+      return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`;
+    }
+    const rgbMatch = trimmed.match(/^rgba?\(([^)]+)\)$/);
+    if (rgbMatch) {
+      const channels = rgbMatch[1]
+        .split(",")
+        .slice(0, 3)
+        .map((part) => Number.parseFloat(part.trim()));
+      if (channels.length === 3 && channels.every((channel) => Number.isFinite(channel))) {
+        const r = Math.max(0, Math.min(255, Math.round(channels[0])));
+        const g = Math.max(0, Math.min(255, Math.round(channels[1])));
+        const b = Math.max(0, Math.min(255, Math.round(channels[2])));
+        return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+      }
+    }
+    return fallback;
+  };
+
+  const toRgbChannel = (value: number): number => {
+    return Math.round(Math.max(0, Math.min(1, value)) * 255);
   };
 
   const fromHexColor = (hex: string): { r: number; g: number; b: number } => {
@@ -392,7 +460,7 @@ export function createControlPanel(
     body.appendChild(row);
   };
 
-  type TabKey = "noise" | "audio" | "shader" | "interation" | "camera";
+  type TabKey = "noise" | "audio" | "shader" | "interation" | "camera" | "ui";
   const tabsNav = document.createElement("div");
   tabsNav.className = "tabs-nav";
   const tabsPanels = document.createElement("div");
@@ -407,6 +475,7 @@ export function createControlPanel(
       tabButtons[key].dataset.active = isActive ? "true" : "false";
       tabPanels[key].hidden = !isActive;
     }
+    scheduleScrollbarTrackAnchorsUpdate();
   };
 
   const createTab = (key: TabKey, labelText: string): void => {
@@ -433,6 +502,368 @@ export function createControlPanel(
   createTab("shader", "Shader");
   createTab("interation", "Interation");
   createTab("camera", "Camera");
+  createTab("ui", "UI");
+
+  const documentStyle = document.documentElement.style;
+  const rootComputedStyle = getComputedStyle(document.documentElement);
+  const initialTextColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--text"), "#c5cfdf");
+  const initialMainUiColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--ui-main-color"), "#253041");
+  const initialPanelHeadColor = normalizeHexColor(
+    rootComputedStyle.getPropertyValue("--panel-head-color"),
+    "#1f2836",
+  );
+  const initialUiColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--accent"), "#96c6ff");
+  const initialSliderColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--slider-fill"), initialUiColor);
+  const initialScrollbarColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--ui-scrollbar-color"), "#7e8999");
+  const parsedUiScale = Number.parseFloat(rootComputedStyle.getPropertyValue("--ui-scale"));
+  const parsedUiBevelStrength = Number.parseFloat(rootComputedStyle.getPropertyValue("--ui-bevel-strength"));
+  const parsedMenuSectionGap = Number.parseFloat(rootComputedStyle.getPropertyValue("--menu-section-gap"));
+  const parsedMenuPaddingTop = Number.parseFloat(rootComputedStyle.getPropertyValue("--panel-content-pad-top"));
+  const parsedMenuPaddingBottom = Number.parseFloat(rootComputedStyle.getPropertyValue("--panel-content-pad-bottom"));
+  const uiScaleState = {
+    value: Number.isFinite(parsedUiScale) && parsedUiScale > 0 ? parsedUiScale : 1,
+  };
+  const uiBevelStrengthState = {
+    value: Number.isFinite(parsedUiBevelStrength) && parsedUiBevelStrength > 0 ? parsedUiBevelStrength : 1,
+  };
+  const menuSectionGapState = {
+    value: Number.isFinite(parsedMenuSectionGap) ? parsedMenuSectionGap : 1,
+  };
+  const menuPaddingTopState = {
+    value: Number.isFinite(parsedMenuPaddingTop) ? parsedMenuPaddingTop : 1,
+  };
+  const menuPaddingBottomState = {
+    value: Number.isFinite(parsedMenuPaddingBottom) ? parsedMenuPaddingBottom : 1,
+  };
+  const uiTextColor = fromHexColor(initialTextColor);
+  const uiMainColor = fromHexColor(initialMainUiColor);
+  const panelHeadColor = fromHexColor(initialPanelHeadColor);
+  const uiAccentColor = fromHexColor(initialUiColor);
+  const uiSliderColor = fromHexColor(initialSliderColor);
+  const uiScrollbarColor = fromHexColor(initialScrollbarColor);
+
+  const clamp = (value: number, min: number, max: number): number => {
+    return Math.max(min, Math.min(max, value));
+  };
+
+  const syncScrollbarFit = (): void => {
+    const scale = clamp(uiScaleState.value, 0.75, 1.6);
+    const bevel = clamp(uiBevelStrengthState.value, 0.6, 1.8);
+    const sizePx = clamp(6.8 * scale, 6, 11);
+    const topOffsetPx = clamp((4.5 + (bevel - 1) * 5.2) * scale, 4, 14);
+    const bottomOffsetPx = clamp((11 + (bevel - 1) * 8) * scale, 10, 26);
+    const thumbMinPx = clamp((34 + (bevel - 1) * 12) * scale, 26, 54);
+    const panelStyles = getComputedStyle(panelElement);
+    const panelInlinePadPx = Number.parseFloat(panelStyles.paddingRight);
+    const rightOffsetPx = clamp(
+      ((Number.isFinite(panelInlinePadPx) ? panelInlinePadPx : 15) - sizePx) * 0.5,
+      0,
+      40,
+    );
+
+    documentStyle.setProperty("--ui-scrollbar-size", `${sizePx.toFixed(1)}px`);
+    documentStyle.setProperty("--ui-scrollbar-right-offset", `${rightOffsetPx.toFixed(1)}px`);
+    documentStyle.setProperty("--ui-scrollbar-top-offset", `${topOffsetPx.toFixed(1)}px`);
+    documentStyle.setProperty("--ui-scrollbar-bottom-offset", `${bottomOffsetPx.toFixed(1)}px`);
+    documentStyle.setProperty("--ui-scrollbar-thumb-min", `${thumbMinPx.toFixed(1)}px`);
+  };
+
+  let scrollbarAnchorRafId = 0;
+  let scrollbarSyncRafId = 0;
+  let scrollbarDragPointerId: number | null = null;
+  let scrollbarDragStartClientY = 0;
+  let scrollbarDragStartScrollTop = 0;
+  let lastScrollbarScrollTop = -1;
+  let lastScrollbarClientHeight = -1;
+  let lastScrollbarScrollHeight = -1;
+  let lastScrollbarTrackHeight = -1;
+  const parseCssPx = (value: string, fallback: number): number => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const parseCssRadiusPx = (value: string, fallback: number): number => {
+    const token = value.trim().split(/\s+/)[0] ?? "";
+    const parsed = Number.parseFloat(token);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const getScrollbarMetrics = (): {
+    scrollRange: number;
+    trackHeight: number;
+    thumbSize: number;
+    maxThumbOffset: number;
+  } | null => {
+    const scrollRange = tabsPanels.scrollHeight - tabsPanels.clientHeight;
+    if (scrollRange <= 0) {
+      return null;
+    }
+
+    const rootStyles = getComputedStyle(document.documentElement);
+    const fallbackTrackHeight = Math.max(tabsPanels.clientHeight, 0);
+    const trackHeight = panelScrollbar.clientHeight > 0 ? panelScrollbar.clientHeight : fallbackTrackHeight;
+    if (trackHeight <= 0) {
+      return null;
+    }
+
+    const minThumb = parseCssPx(rootStyles.getPropertyValue("--ui-scrollbar-thumb-min"), 26);
+    const visibleRatio = tabsPanels.clientHeight / tabsPanels.scrollHeight;
+    const thumbSize = clamp(trackHeight * visibleRatio, Math.min(minThumb, trackHeight), trackHeight);
+    const maxThumbOffset = Math.max(trackHeight - thumbSize, 0);
+
+    return {
+      scrollRange,
+      trackHeight,
+      thumbSize,
+      maxThumbOffset,
+    };
+  };
+  const updateCustomScrollbarThumb = (): void => {
+    const metrics = getScrollbarMetrics();
+    const scrollTop = tabsPanels.scrollTop;
+    panelScrollbar.style.transform = "translateY(0)";
+    if (!metrics) {
+      panelScrollbar.dataset.hidden = "true";
+      panelScrollbarThumb.style.height = "";
+      panelScrollbarThumb.style.transform = "translateY(0)";
+      return;
+    }
+
+    panelScrollbar.dataset.hidden = "false";
+    const scrollRatio = clamp(scrollTop / metrics.scrollRange, 0, 1);
+    const thumbSize = metrics.thumbSize;
+    const maxThumbOffset = metrics.maxThumbOffset;
+    const thumbOffset = maxThumbOffset * scrollRatio;
+
+    panelScrollbarThumb.style.height = `${thumbSize.toFixed(1)}px`;
+    panelScrollbarThumb.style.transform = `translateY(${thumbOffset.toFixed(1)}px)`;
+  };
+
+  const stopScrollbarThumbDrag = (pointerId?: number): void => {
+    if (scrollbarDragPointerId === null) {
+      return;
+    }
+    if (pointerId !== undefined && pointerId !== scrollbarDragPointerId) {
+      return;
+    }
+
+    const activePointerId = scrollbarDragPointerId;
+    scrollbarDragPointerId = null;
+    panelScrollbarThumb.dataset.dragging = "false";
+    if (panelScrollbarThumb.hasPointerCapture(activePointerId)) {
+      panelScrollbarThumb.releasePointerCapture(activePointerId);
+    }
+  };
+
+  const onScrollbarThumbPointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) {
+      return;
+    }
+    const metrics = getScrollbarMetrics();
+    if (!metrics) {
+      return;
+    }
+
+    event.preventDefault();
+    scrollbarDragPointerId = event.pointerId;
+    scrollbarDragStartClientY = event.clientY;
+    scrollbarDragStartScrollTop = tabsPanels.scrollTop;
+    panelScrollbarThumb.dataset.dragging = "true";
+    panelScrollbarThumb.setPointerCapture(event.pointerId);
+  };
+
+  const onScrollbarThumbPointerMove = (event: PointerEvent): void => {
+    if (scrollbarDragPointerId === null || event.pointerId !== scrollbarDragPointerId) {
+      return;
+    }
+    const metrics = getScrollbarMetrics();
+    if (!metrics || metrics.maxThumbOffset <= 0 || metrics.scrollRange <= 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const deltaY = event.clientY - scrollbarDragStartClientY;
+    const scrollDelta = (deltaY / metrics.maxThumbOffset) * metrics.scrollRange;
+    tabsPanels.scrollTop = clamp(scrollbarDragStartScrollTop + scrollDelta, 0, metrics.scrollRange);
+    updateCustomScrollbarThumb();
+  };
+
+  const onScrollbarThumbPointerUp = (event: PointerEvent): void => {
+    stopScrollbarThumbDrag(event.pointerId);
+  };
+
+  const onScrollbarThumbPointerCancel = (event: PointerEvent): void => {
+    stopScrollbarThumbDrag(event.pointerId);
+  };
+
+  const onScrollbarThumbLostPointerCapture = (event: PointerEvent): void => {
+    stopScrollbarThumbDrag(event.pointerId);
+  };
+
+  panelScrollbarThumb.dataset.dragging = "false";
+  panelScrollbarThumb.addEventListener("pointerdown", onScrollbarThumbPointerDown);
+  panelScrollbarThumb.addEventListener("pointermove", onScrollbarThumbPointerMove);
+  panelScrollbarThumb.addEventListener("pointerup", onScrollbarThumbPointerUp);
+  panelScrollbarThumb.addEventListener("pointercancel", onScrollbarThumbPointerCancel);
+  panelScrollbarThumb.addEventListener("lostpointercapture", onScrollbarThumbLostPointerCapture);
+  cleanup.push(() => panelScrollbarThumb.removeEventListener("pointerdown", onScrollbarThumbPointerDown));
+  cleanup.push(() => panelScrollbarThumb.removeEventListener("pointermove", onScrollbarThumbPointerMove));
+  cleanup.push(() => panelScrollbarThumb.removeEventListener("pointerup", onScrollbarThumbPointerUp));
+  cleanup.push(() => panelScrollbarThumb.removeEventListener("pointercancel", onScrollbarThumbPointerCancel));
+  cleanup.push(() => panelScrollbarThumb.removeEventListener("lostpointercapture", onScrollbarThumbLostPointerCapture));
+  cleanup.push(() => stopScrollbarThumbDrag());
+
+  const startScrollbarSyncLoop = (): void => {
+    const tick = (): void => {
+      const currentScrollTop = tabsPanels.scrollTop;
+      const currentClientHeight = tabsPanels.clientHeight;
+      const currentScrollHeight = tabsPanels.scrollHeight;
+      const currentTrackHeight = panelScrollbar.clientHeight;
+
+      if (
+        currentScrollTop !== lastScrollbarScrollTop ||
+        currentClientHeight !== lastScrollbarClientHeight ||
+        currentScrollHeight !== lastScrollbarScrollHeight ||
+        currentTrackHeight !== lastScrollbarTrackHeight
+      ) {
+        lastScrollbarScrollTop = currentScrollTop;
+        lastScrollbarClientHeight = currentClientHeight;
+        lastScrollbarScrollHeight = currentScrollHeight;
+        lastScrollbarTrackHeight = currentTrackHeight;
+        updateCustomScrollbarThumb();
+      }
+
+      scrollbarSyncRafId = window.requestAnimationFrame(tick);
+    };
+
+    if (scrollbarSyncRafId !== 0) {
+      window.cancelAnimationFrame(scrollbarSyncRafId);
+    }
+    scrollbarSyncRafId = window.requestAnimationFrame(tick);
+  };
+
+  const updateScrollbarTrackAnchors = (): void => {
+    if (!tabsPanels.isConnected) {
+      return;
+    }
+    const panelRect = panelElement.getBoundingClientRect();
+    const panelHeadRect = panelHeadElement.getBoundingClientRect();
+    const tabsPanelsRect = tabsPanels.getBoundingClientRect();
+    const panelStyles = getComputedStyle(panelElement);
+    const tabsPanelsStyles = getComputedStyle(tabsPanels);
+    if (panelRect.height <= 0 || tabsPanelsRect.height <= 0 || panelHeadRect.height <= 0) {
+      return;
+    }
+
+    const tabsPaddingTop = parseCssPx(tabsPanelsStyles.paddingTop, 0);
+    const tabsPaddingBottom = parseCssPx(tabsPanelsStyles.paddingBottom, 0);
+    const topInset = panelHeadRect.bottom - panelRect.top + tabsPaddingTop;
+    const bottomInset = panelRect.bottom - tabsPanelsRect.bottom + tabsPaddingBottom;
+    const topRightRadius = parseCssRadiusPx(panelStyles.borderTopRightRadius, 0);
+    const bottomRightRadius = parseCssRadiusPx(panelStyles.borderBottomRightRadius, 0);
+
+    const topOffset = clamp(Math.max(topInset, topRightRadius), 0, panelRect.height * 0.46);
+    const bottomOffset = clamp(Math.max(bottomInset, bottomRightRadius), 0, panelRect.height * 0.46);
+
+    documentStyle.setProperty("--ui-scrollbar-top-offset", `${topOffset.toFixed(1)}px`);
+    documentStyle.setProperty("--ui-scrollbar-bottom-offset", `${bottomOffset.toFixed(1)}px`);
+    updateCustomScrollbarThumb();
+  };
+
+  const scheduleScrollbarTrackAnchorsUpdate = (): void => {
+    if (scrollbarAnchorRafId !== 0) {
+      window.cancelAnimationFrame(scrollbarAnchorRafId);
+    }
+    scrollbarAnchorRafId = window.requestAnimationFrame(() => {
+      scrollbarAnchorRafId = 0;
+      updateScrollbarTrackAnchors();
+    });
+  };
+
+  const applyUiTextColor = (color: { r: number; g: number; b: number }): void => {
+    const hex = toHexColor(color.r, color.g, color.b);
+    const r = toRgbChannel(color.r);
+    const g = toRgbChannel(color.g);
+    const b = toRgbChannel(color.b);
+    documentStyle.setProperty("--text", hex);
+    documentStyle.setProperty("--muted", `rgba(${r}, ${g}, ${b}, 0.72)`);
+  };
+
+  const applyUiMainColor = (color: { r: number; g: number; b: number }): void => {
+    uiMainColor.r = color.r;
+    uiMainColor.g = color.g;
+    uiMainColor.b = color.b;
+    documentStyle.setProperty("--ui-main-color", toHexColor(color.r, color.g, color.b));
+  };
+
+  const applyPanelHeadColor = (color: { r: number; g: number; b: number }): void => {
+    panelHeadColor.r = color.r;
+    panelHeadColor.g = color.g;
+    panelHeadColor.b = color.b;
+    documentStyle.setProperty("--panel-head-color", toHexColor(color.r, color.g, color.b));
+  };
+
+  const applyUiColor = (color: { r: number; g: number; b: number }): void => {
+    const hex = toHexColor(color.r, color.g, color.b);
+    const r = toRgbChannel(color.r);
+    const g = toRgbChannel(color.g);
+    const b = toRgbChannel(color.b);
+    documentStyle.setProperty("--accent", hex);
+    documentStyle.setProperty("--line", `rgba(${r}, ${g}, ${b}, 0.18)`);
+    documentStyle.setProperty("--line-strong", `rgba(${r}, ${g}, ${b}, 0.32)`);
+  };
+
+  const applyUiScale = (value: number): void => {
+    const clamped = Math.max(0.75, Math.min(1.6, value));
+    documentStyle.setProperty("--ui-scale", clamped.toFixed(2));
+    syncScrollbarFit();
+    scheduleScrollbarTrackAnchorsUpdate();
+  };
+
+  const applyUiBevelStrength = (value: number): void => {
+    const clamped = clamp(value, 0.6, 1.8);
+    documentStyle.setProperty("--ui-bevel-strength", clamped.toFixed(2));
+    syncScrollbarFit();
+    scheduleScrollbarTrackAnchorsUpdate();
+  };
+
+  const applyUiSliderColor = (color: { r: number; g: number; b: number }): void => {
+    const hex = toHexColor(color.r, color.g, color.b);
+    documentStyle.setProperty("--slider-fill", hex);
+  };
+
+  const applyUiScrollbarColor = (color: { r: number; g: number; b: number }): void => {
+    const hex = toHexColor(color.r, color.g, color.b);
+    documentStyle.setProperty("--ui-scrollbar-color", hex);
+  };
+
+  const applyMenuSectionGap = (value: number): void => {
+    const clamped = clamp(value, 0.2, 1.8);
+    documentStyle.setProperty("--menu-section-gap", `${clamped.toFixed(2)}rem`);
+    updateCustomScrollbarThumb();
+  };
+
+  const applyMenuPaddingTop = (value: number): void => {
+    const clamped = clamp(value, 0, 2);
+    documentStyle.setProperty("--panel-content-pad-top", `${clamped.toFixed(2)}rem`);
+    scheduleScrollbarTrackAnchorsUpdate();
+  };
+
+  const applyMenuPaddingBottom = (value: number): void => {
+    const clamped = clamp(value, 0, 2);
+    documentStyle.setProperty("--panel-content-pad-bottom", `${clamped.toFixed(2)}rem`);
+    scheduleScrollbarTrackAnchorsUpdate();
+  };
+
+  applyUiTextColor(uiTextColor);
+  applyUiMainColor(uiMainColor);
+  applyPanelHeadColor(panelHeadColor);
+  applyUiColor(uiAccentColor);
+  applyUiBevelStrength(uiBevelStrengthState.value);
+  applyUiScale(uiScaleState.value);
+  applyUiSliderColor(uiSliderColor);
+  applyUiScrollbarColor(uiScrollbarColor);
+  applyMenuSectionGap(menuSectionGapState.value);
+  applyMenuPaddingTop(menuPaddingTopState.value);
+  applyMenuPaddingBottom(menuPaddingBottomState.value);
 
   const unifiedFolder = createFolder("Unified Noise", true);
   const unifiedBody = requireElement<HTMLDivElement>(unifiedFolder, ".folder-body");
@@ -804,6 +1235,108 @@ export function createControlPanel(
     suffix: "s",
   }, callbacks.onCameraParamChange);
 
+  const uiFolder = createFolder("UI Config", true);
+  const uiBody = requireElement<HTMLDivElement>(uiFolder, ".folder-body");
+  bindSelect<UiDepthMode>(
+    uiBody,
+    "UI Bevel",
+    [
+      { label: "Soft", value: "soft" },
+      { label: "Medium", value: "medium" },
+      { label: "Deep", value: "deep" },
+    ],
+    uiDepthState.value,
+    (value): void => {
+      setUiDepth(value);
+    },
+  );
+  bindRange(uiBody, uiBevelStrengthState, "value", {
+    label: "Bevel Shape",
+    min: 0.6,
+    max: 1.8,
+    step: 0.01,
+    precision: 2,
+  }, (_key, value): void => {
+    uiBevelStrengthState.value = value;
+    applyUiBevelStrength(value);
+  });
+  bindColor(uiBody, "UI Text Color", uiTextColor, (next): void => {
+    uiTextColor.r = next.r;
+    uiTextColor.g = next.g;
+    uiTextColor.b = next.b;
+    applyUiTextColor(uiTextColor);
+  });
+  bindColor(uiBody, "Main UI Color", uiMainColor, (next): void => {
+    uiMainColor.r = next.r;
+    uiMainColor.g = next.g;
+    uiMainColor.b = next.b;
+    applyUiMainColor(uiMainColor);
+  });
+  bindColor(uiBody, "Head Color", panelHeadColor, (next): void => {
+    panelHeadColor.r = next.r;
+    panelHeadColor.g = next.g;
+    panelHeadColor.b = next.b;
+    applyPanelHeadColor(panelHeadColor);
+  });
+  bindColor(uiBody, "Accent Color", uiAccentColor, (next): void => {
+    uiAccentColor.r = next.r;
+    uiAccentColor.g = next.g;
+    uiAccentColor.b = next.b;
+    applyUiColor(uiAccentColor);
+  });
+  bindColor(uiBody, "Slider Fill", uiSliderColor, (next): void => {
+    uiSliderColor.r = next.r;
+    uiSliderColor.g = next.g;
+    uiSliderColor.b = next.b;
+    applyUiSliderColor(uiSliderColor);
+  });
+  bindColor(uiBody, "Scrollbar Color", uiScrollbarColor, (next): void => {
+    uiScrollbarColor.r = next.r;
+    uiScrollbarColor.g = next.g;
+    uiScrollbarColor.b = next.b;
+    applyUiScrollbarColor(uiScrollbarColor);
+  });
+  bindRange(uiBody, uiScaleState, "value", {
+    label: "UI Size",
+    min: 0.75,
+    max: 1.6,
+    step: 0.01,
+    precision: 2,
+  }, (_key, value): void => {
+    uiScaleState.value = value;
+    applyUiScale(value);
+  });
+  bindRange(uiBody, menuSectionGapState, "value", {
+    label: "Folder Gap",
+    min: 0.2,
+    max: 1.8,
+    step: 0.01,
+    precision: 2,
+  }, (_key, value): void => {
+    menuSectionGapState.value = value;
+    applyMenuSectionGap(value);
+  });
+  bindRange(uiBody, menuPaddingTopState, "value", {
+    label: "Menu Padding Top",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, (_key, value): void => {
+    menuPaddingTopState.value = value;
+    applyMenuPaddingTop(value);
+  });
+  bindRange(uiBody, menuPaddingBottomState, "value", {
+    label: "Menu Padding Bottom",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, (_key, value): void => {
+    menuPaddingBottomState.value = value;
+    applyMenuPaddingBottom(value);
+  });
+
   const materialFolder = createFolder("Material", true);
   const materialBody = requireElement<HTMLDivElement>(materialFolder, ".folder-body");
   const pbrMaterialBody = document.createElement("div");
@@ -1097,10 +1630,13 @@ export function createControlPanel(
   tabPanels.shader.appendChild(shadingFolder);
   tabPanels.interation.appendChild(interactionFolder);
   tabPanels.camera.appendChild(cameraFolder);
+  tabPanels.ui.appendChild(uiFolder);
 
-  foldersRoot.appendChild(tabsNav);
+  tabsNavSlot.appendChild(tabsNav);
   foldersRoot.appendChild(tabsPanels);
   setActiveTab("noise");
+  scheduleScrollbarTrackAnchorsUpdate();
+  startScrollbarSyncLoop();
 
   const onFileChange = async (): Promise<void> => {
     const selected = fileInput.files?.[0];
@@ -1145,13 +1681,34 @@ export function createControlPanel(
   const onPlayButtonClick = (): void => {
     void onPlayClick();
   };
+  const onWindowResize = (): void => {
+    scheduleScrollbarTrackAnchorsUpdate();
+  };
+  const onPanelScroll = (): void => {
+    updateCustomScrollbarThumb();
+  };
 
   fileInput.addEventListener("change", onFileChange);
   micButton.addEventListener("click", onMicButtonClick);
   playButton.addEventListener("click", onPlayButtonClick);
+  tabsPanels.addEventListener("scroll", onPanelScroll, { passive: true });
+  window.addEventListener("resize", onWindowResize);
   cleanup.push(() => fileInput.removeEventListener("change", onFileChange));
   cleanup.push(() => micButton.removeEventListener("click", onMicButtonClick));
   cleanup.push(() => playButton.removeEventListener("click", onPlayButtonClick));
+  cleanup.push(() => tabsPanels.removeEventListener("scroll", onPanelScroll));
+  cleanup.push(() => window.removeEventListener("resize", onWindowResize));
+  cleanup.push(() => {
+    if (scrollbarAnchorRafId !== 0) {
+      window.cancelAnimationFrame(scrollbarAnchorRafId);
+      scrollbarAnchorRafId = 0;
+    }
+    if (scrollbarSyncRafId !== 0) {
+      window.cancelAnimationFrame(scrollbarSyncRafId);
+      scrollbarSyncRafId = 0;
+    }
+  });
+  setUiDepth(uiDepthState.value);
 
   refreshButtonState();
 
