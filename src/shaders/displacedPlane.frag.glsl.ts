@@ -17,6 +17,11 @@ uniform float uMatRoughness;
 uniform float uMatMetalness;
 uniform float uMatClearcoat;
 uniform float uMatNormalStrength;
+uniform float uCurvatureAmount;
+uniform float uCurvatureScale;
+uniform float uCurvaturePower;
+uniform float uEdgeWearStrength;
+uniform float uCavityWearStrength;
 uniform sampler2D uAlbedoMap;
 uniform sampler2D uRoughnessMap;
 uniform sampler2D uMetalnessMap;
@@ -119,6 +124,31 @@ vec3 sampleMatcapWithBlur(vec2 uv, float blurAmount) {
   return sum;
 }
 
+vec3 applyCurvatureWear(vec3 color, vec3 normal) {
+  float amount = max(0.0, uCurvatureAmount);
+  if (amount <= 0.0001) {
+    return color;
+  }
+
+  vec3 dpdx = dFdx(vWorldPos);
+  vec3 dpdy = dFdy(vWorldPos);
+  vec3 dndx = dFdx(normal);
+  vec3 dndy = dFdy(normal);
+
+  float curvatureMagnitude = (length(dndx) + length(dndy)) * max(0.0, uCurvatureScale);
+  float curvatureSign = sign(dot(dndx, dpdx) + dot(dndy, dpdy));
+  float signedCurvature = curvatureMagnitude * curvatureSign;
+  float power = max(0.05, uCurvaturePower);
+
+  float edgeMask = pow(clamp(-signedCurvature, 0.0, 1.0), power);
+  float cavityMask = pow(clamp(signedCurvature, 0.0, 1.0), power);
+
+  vec3 result = color;
+  result += vec3(edgeMask * max(0.0, uEdgeWearStrength));
+  result *= 1.0 - cavityMask * max(0.0, uCavityWearStrength);
+  return mix(color, clamp(result, vec3(0.0), vec3(1.0)), amount);
+}
+
 vec3 evaluatePBRLight(
   vec3 n,
   vec3 v,
@@ -190,6 +220,7 @@ vec3 shadeSurface(vec3 normal, vec3 viewDir, vec2 uv) {
     n = applyNormalMap(normal, vWorldPos, uv);
   }
 
+  vec3 shaded;
   if (uMaterialMode > 0.5) {
     vec3 viewNormal = normalize((viewMatrix * vec4(n, 0.0)).xyz);
     vec2 matcapUv = clamp(viewNormal.xy * 0.5 + 0.5, 0.0, 1.0);
@@ -197,19 +228,20 @@ vec3 shadeSurface(vec3 normal, vec3 viewDir, vec2 uv) {
     matcapColor = (matcapColor - vec3(0.5)) * max(0.0, uMatcapContrast) + vec3(0.5);
     matcapColor = applySaturation(matcapColor, uMatcapSaturation);
     matcapColor *= max(0.0, uMatcapBrightness);
-    return clamp(matcapColor, vec3(0.0), vec3(1.0));
+    shaded = clamp(matcapColor, vec3(0.0), vec3(1.0));
+  } else {
+    vec3 keyDir = normalize(uKeyDir);
+    vec3 fillDir = normalize(uFillDir);
+    float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+
+    vec3 ambient = albedo * (uDiffuseBase + hemi * uHemiStrength) * (1.0 - metalness * 0.65);
+    vec3 keyLight = evaluatePBRLight(n, viewDir, keyDir, albedo, roughness, metalness, clearcoat) * uKeyStrength;
+    vec3 fillLight = evaluatePBRLight(n, viewDir, fillDir, albedo, roughness, metalness, clearcoat) * uFillStrength;
+
+    shaded = clamp(ambient + keyLight + fillLight, vec3(0.0), vec3(1.0));
   }
 
-  vec3 keyDir = normalize(uKeyDir);
-  vec3 fillDir = normalize(uFillDir);
-  float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
-
-  vec3 ambient = albedo * (uDiffuseBase + hemi * uHemiStrength) * (1.0 - metalness * 0.65);
-  vec3 keyLight = evaluatePBRLight(n, viewDir, keyDir, albedo, roughness, metalness, clearcoat) * uKeyStrength;
-  vec3 fillLight = evaluatePBRLight(n, viewDir, fillDir, albedo, roughness, metalness, clearcoat) * uFillStrength;
-
-  vec3 shaded = ambient + keyLight + fillLight;
-  return clamp(shaded, vec3(0.0), vec3(1.0));
+  return applyCurvatureWear(shaded, n);
 }
 
 void main() {

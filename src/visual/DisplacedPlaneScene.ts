@@ -13,11 +13,15 @@ export interface HoudiniNoiseParams {
   baseOffsetX: number;
   baseOffsetY: number;
   baseOffsetZ: number;
+  domainScaleX: number;
+  domainScaleY: number;
+  domainRotationDeg: number;
   latticeWarp: number;
   latticeWarpFreq: number;
   complement: number;
   finalAmp: number;
   turboFreq: number;
+  turboLacunarity: number;
   turboAmp: number;
   roughness: number;
   attenuation: number;
@@ -25,6 +29,13 @@ export interface HoudiniNoiseParams {
   outputMin: number;
   outputMax: number;
   driftSpeed: number;
+  detailFreq: number;
+  detailStrength: number;
+  audioMacroReactivity: number;
+  audioDetailReactivity: number;
+  symmetryMode: number;
+  symmetryWidth: number;
+  symmetryStretch: number;
 }
 
 export interface AudioMapParams {
@@ -40,6 +51,7 @@ export interface InteractionParams {
   mouseRadius: number;
   mouseStrength: number;
   mouseNoiseOffset: number;
+  parallaxStrength: number;
   edgeFade: number;
   edgeRadius: number;
   edgePower: number;
@@ -47,7 +59,6 @@ export interface InteractionParams {
 
 export interface QualityParams {
   subdivisions: number;
-  pixelRatioMax: number;
 }
 
 export interface CameraParams {
@@ -60,6 +71,8 @@ export interface CameraParams {
   maxAzimuthDeg: number;
   centerLock: number;
   panRange: number;
+  orbitTail: number;
+  panTail: number;
 }
 
 export interface MaterialParams {
@@ -68,6 +81,11 @@ export interface MaterialParams {
   metalness: number;
   clearcoat: number;
   normalStrength: number;
+  curvatureAmount: number;
+  curvatureScale: number;
+  curvaturePower: number;
+  edgeWearStrength: number;
+  cavityWearStrength: number;
   matcapBrightness: number;
   matcapBlur: number;
   matcapContrast: number;
@@ -107,11 +125,15 @@ export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
   baseOffsetX: -8.0,
   baseOffsetY: -8.0,
   baseOffsetZ: -8.0,
+  domainScaleX: 1.0,
+  domainScaleY: 1.0,
+  domainRotationDeg: 0.0,
   latticeWarp: 0.0,
   latticeWarpFreq: 0.05,
   complement: 0.0,
   finalAmp: 8.0,
   turboFreq: 0.7,
+  turboLacunarity: 1.92,
   turboAmp: 1.0,
   roughness: 0.1,
   attenuation: 0.42,
@@ -119,6 +141,13 @@ export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
   outputMin: -0.06,
   outputMax: 0.44,
   driftSpeed: 0.174,
+  detailFreq: 3.35,
+  detailStrength: 0.45,
+  audioMacroReactivity: 1.0,
+  audioDetailReactivity: 1.0,
+  symmetryMode: 0,
+  symmetryWidth: 0.08,
+  symmetryStretch: 0.4,
 };
 
 export const DEFAULT_AUDIO_MAP_PARAMS: AudioMapParams = {
@@ -134,6 +163,7 @@ export const DEFAULT_INTERACTION_PARAMS: InteractionParams = {
   mouseRadius: 0.5,
   mouseStrength: 0.28,
   mouseNoiseOffset: 0,
+  parallaxStrength: 0.0,
   edgeFade: 0.407,
   edgeRadius: 0.5,
   edgePower: 1.23,
@@ -141,7 +171,6 @@ export const DEFAULT_INTERACTION_PARAMS: InteractionParams = {
 
 export const DEFAULT_QUALITY_PARAMS: QualityParams = {
   subdivisions: 1024,
-  pixelRatioMax: 1.0,
 };
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
@@ -154,6 +183,8 @@ export const DEFAULT_CAMERA_PARAMS: CameraParams = {
   maxAzimuthDeg: 180,
   centerLock: 0,
   panRange: 2.5,
+  orbitTail: 1.0,
+  panTail: 1.0,
 };
 
 export const DEFAULT_MATERIAL_PARAMS: MaterialParams = {
@@ -162,6 +193,11 @@ export const DEFAULT_MATERIAL_PARAMS: MaterialParams = {
   metalness: 1.0,
   clearcoat: 0.0,
   normalStrength: 0.0,
+  curvatureAmount: 0.0,
+  curvatureScale: 8.0,
+  curvaturePower: 1.2,
+  edgeWearStrength: 0.35,
+  cavityWearStrength: 0.25,
   matcapBrightness: 2.22,
   matcapBlur: 0.0,
   matcapContrast: 1.0,
@@ -222,23 +258,34 @@ const BACKGROUND_HOLE_EXTRA = 0.03;
 const BACKGROUND_CIRCLE_RADIUS = 100000;
 const BACKGROUND_CIRCLE_FADE = 1;
 const DEFAULT_MATCAP_SIZE = 512;
+const DEFAULT_MATCAP_URL = "/gorilla2.jpg";
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 interface PlaneUniforms {
   uTime: THREE.IUniform<number>;
   uBaseFreq: THREE.IUniform<number>;
   uBaseOffset: THREE.IUniform<THREE.Vector3>;
+  uDomainScale: THREE.IUniform<THREE.Vector2>;
+  uDomainRotation: THREE.IUniform<number>;
   uLatticeWarp: THREE.IUniform<number>;
   uLatticeWarpFreq: THREE.IUniform<number>;
   uComplement: THREE.IUniform<number>;
   uFinalAmp: THREE.IUniform<number>;
   uTurboFreq: THREE.IUniform<number>;
+  uTurboLacunarity: THREE.IUniform<number>;
   uTurboAmp: THREE.IUniform<number>;
   uRoughness: THREE.IUniform<number>;
   uAttenuation: THREE.IUniform<number>;
   uTurbulence: THREE.IUniform<number>;
   uOutputMin: THREE.IUniform<number>;
   uOutputMax: THREE.IUniform<number>;
+  uDetailFreq: THREE.IUniform<number>;
+  uDetailStrength: THREE.IUniform<number>;
+  uAudioMacroReactivity: THREE.IUniform<number>;
+  uAudioDetailReactivity: THREE.IUniform<number>;
+  uSymmetryMode: THREE.IUniform<number>;
+  uSymmetryWidth: THREE.IUniform<number>;
+  uSymmetryStretch: THREE.IUniform<number>;
   uLow: THREE.IUniform<number>;
   uMid: THREE.IUniform<number>;
   uHigh: THREE.IUniform<number>;
@@ -268,6 +315,11 @@ interface PlaneUniforms {
   uMatMetalness: THREE.IUniform<number>;
   uMatClearcoat: THREE.IUniform<number>;
   uMatNormalStrength: THREE.IUniform<number>;
+  uCurvatureAmount: THREE.IUniform<number>;
+  uCurvatureScale: THREE.IUniform<number>;
+  uCurvaturePower: THREE.IUniform<number>;
+  uEdgeWearStrength: THREE.IUniform<number>;
+  uCavityWearStrength: THREE.IUniform<number>;
   uAlbedoMap: THREE.IUniform<THREE.Texture>;
   uRoughnessMap: THREE.IUniform<THREE.Texture>;
   uMetalnessMap: THREE.IUniform<THREE.Texture>;
@@ -328,6 +380,26 @@ export class DisplacedPlaneScene {
   private readonly floorPlane = new THREE.Plane(WORLD_UP, 0);
   private readonly controlsCenter = new THREE.Vector3(0, 0.1, 0);
   private readonly targetDelta = new THREE.Vector3();
+  private readonly controlDragLastClient = new THREE.Vector2();
+  private readonly rotateInertiaVelocity = new THREE.Vector2();
+  private readonly panInertiaVelocity = new THREE.Vector3();
+  private readonly panInertiaRight = new THREE.Vector3();
+  private readonly panInertiaUp = new THREE.Vector3();
+  private readonly rotateInertiaOffset = new THREE.Vector3();
+  private readonly rotateInertiaAxis = new THREE.Vector3();
+  private readonly parallaxMoveTarget = new THREE.Vector2();
+  private readonly parallaxMoveCurrent = new THREE.Vector2();
+  private readonly parallaxLastClient = new THREE.Vector2();
+  private parallaxHasLastClient = false;
+  private controlDragPointerId = -1;
+  private controlDragLastTimeMs = 0;
+  private controlDragMode: "none" | "rotate" | "pan" = "none";
+  private controlDragActive = false;
+  private readonly parallaxOffsetCurrent = new THREE.Vector3();
+  private readonly parallaxOffsetTarget = new THREE.Vector3();
+  private readonly parallaxForward = new THREE.Vector3();
+  private readonly parallaxRight = new THREE.Vector3();
+  private readonly parallaxUp = new THREE.Vector3();
   private mouseStrengthCurrent = 0;
   private mouseStrengthTarget = 0;
   private pulseAge = -1;
@@ -351,7 +423,7 @@ export class DisplacedPlaneScene {
   private readonly defaultAlbedoTexture: THREE.DataTexture;
   private readonly defaultScalarTexture: THREE.DataTexture;
   private readonly defaultNormalTexture: THREE.DataTexture;
-  private readonly defaultMatcapTexture: THREE.DataTexture;
+  private readonly defaultMatcapTexture: THREE.Texture;
 
   private pointerEventToUv(event: PointerEvent): THREE.Vector2 | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -380,6 +452,7 @@ export class DisplacedPlaneScene {
   }
 
   private readonly handlePointerMove = (event: PointerEvent): void => {
+    this.captureParallaxPointerDelta(event);
     const uv = this.pointerEventToUv(event);
     if (!uv) {
       this.mouseStrengthTarget = 0;
@@ -396,6 +469,8 @@ export class DisplacedPlaneScene {
   };
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
+    this.parallaxLastClient.set(event.clientX, event.clientY);
+    this.parallaxHasLastClient = true;
     if (event.button !== 0) {
       return;
     }
@@ -412,7 +487,103 @@ export class DisplacedPlaneScene {
   private readonly handlePointerLeave = (): void => {
     this.mouseStrengthTarget = 0;
     this.pointerMoveDirTarget.set(0, 0);
+    this.parallaxMoveTarget.set(0, 0);
+    this.parallaxHasLastClient = false;
   };
+
+  private readonly handleControlsPointerDown = (event: PointerEvent): void => {
+    const isRotate = event.button === 0;
+    const isPan = event.button === 2 && this.controls.enablePan;
+    if (!isRotate && !isPan) {
+      return;
+    }
+    this.controlDragMode = isRotate ? "rotate" : "pan";
+    this.controlDragActive = true;
+    this.controlDragPointerId = event.pointerId;
+    this.controlDragLastClient.set(event.clientX, event.clientY);
+    this.controlDragLastTimeMs = event.timeStamp;
+    this.rotateInertiaVelocity.set(0, 0);
+    this.panInertiaVelocity.set(0, 0, 0);
+  };
+
+  private readonly handleControlsPointerMove = (event: PointerEvent): void => {
+    this.captureParallaxPointerDelta(event);
+    if (!this.controlDragActive || event.pointerId !== this.controlDragPointerId) {
+      return;
+    }
+
+    const dx = event.clientX - this.controlDragLastClient.x;
+    const dy = event.clientY - this.controlDragLastClient.y;
+    this.controlDragLastClient.set(event.clientX, event.clientY);
+
+    const dtSec = Math.max(1 / 240, (event.timeStamp - this.controlDragLastTimeMs) / 1000);
+    this.controlDragLastTimeMs = event.timeStamp;
+
+    if (this.controlDragMode === "rotate") {
+      const elementHeight = Math.max(1, this.renderer.domElement.clientHeight);
+      const rotateDeltaX = (2 * Math.PI * dx * this.controls.rotateSpeed) / elementHeight;
+      const rotateDeltaY = (2 * Math.PI * dy * this.controls.rotateSpeed) / elementHeight;
+      const invDt = 1 / dtSec;
+      this.rotateInertiaVelocity.set(
+        THREE.MathUtils.lerp(this.rotateInertiaVelocity.x, rotateDeltaX * invDt, 0.65),
+        THREE.MathUtils.lerp(this.rotateInertiaVelocity.y, rotateDeltaY * invDt, 0.65),
+      );
+      return;
+    }
+
+    if (this.controlDragMode === "pan") {
+      const elementHeight = Math.max(1, this.renderer.domElement.clientHeight);
+      const targetDistance =
+        this.camera.position.distanceTo(this.controls.target) * Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5));
+      const panScale = this.controls.panSpeed * (2 * targetDistance / elementHeight);
+      const panX = dx * panScale;
+      const panY = dy * panScale;
+
+      const matrix = this.camera.matrix;
+      this.panInertiaRight.setFromMatrixColumn(matrix, 0).normalize();
+      this.panInertiaUp.setFromMatrixColumn(matrix, 1).normalize();
+
+      const invDt = 1 / dtSec;
+      const vx = -panX * invDt;
+      const vy = panY * invDt;
+      this.panInertiaVelocity
+        .copy(this.panInertiaRight)
+        .multiplyScalar(vx)
+        .addScaledVector(this.panInertiaUp, vy);
+    }
+  };
+
+  private readonly handleControlsPointerUp = (event: PointerEvent): void => {
+    if (!this.controlDragActive || event.pointerId !== this.controlDragPointerId) {
+      return;
+    }
+    this.controlDragActive = false;
+    this.controlDragPointerId = -1;
+    this.controlDragMode = "none";
+  };
+
+  private captureParallaxPointerDelta(event: PointerEvent): void {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    if (!this.parallaxHasLastClient) {
+      this.parallaxLastClient.set(event.clientX, event.clientY);
+      this.parallaxHasLastClient = true;
+      return;
+    }
+
+    const dx = (event.clientX - this.parallaxLastClient.x) / rect.width;
+    const dy = (event.clientY - this.parallaxLastClient.y) / rect.height;
+    this.parallaxLastClient.set(event.clientX, event.clientY);
+
+    this.parallaxMoveTarget.set(dx, dy);
+    const maxLen = 0.08;
+    if (this.parallaxMoveTarget.lengthSq() > maxLen * maxLen) {
+      this.parallaxMoveTarget.setLength(maxLen);
+    }
+  }
 
   constructor(options: DisplacedPlaneSceneOptions) {
     this.container = options.container;
@@ -485,17 +656,27 @@ export class DisplacedPlaneScene {
           this.noiseParams.baseOffsetZ,
         ),
       },
+      uDomainScale: { value: new THREE.Vector2(this.noiseParams.domainScaleX, this.noiseParams.domainScaleY) },
+      uDomainRotation: { value: THREE.MathUtils.degToRad(this.noiseParams.domainRotationDeg) },
       uLatticeWarp: { value: this.noiseParams.latticeWarp },
       uLatticeWarpFreq: { value: this.noiseParams.latticeWarpFreq },
       uComplement: { value: this.noiseParams.complement },
       uFinalAmp: { value: this.noiseParams.finalAmp },
       uTurboFreq: { value: this.noiseParams.turboFreq },
+      uTurboLacunarity: { value: this.noiseParams.turboLacunarity },
       uTurboAmp: { value: this.noiseParams.turboAmp },
       uRoughness: { value: this.noiseParams.roughness },
       uAttenuation: { value: this.noiseParams.attenuation },
       uTurbulence: { value: this.noiseParams.turbulence },
       uOutputMin: { value: this.noiseParams.outputMin },
       uOutputMax: { value: this.noiseParams.outputMax },
+      uDetailFreq: { value: this.noiseParams.detailFreq },
+      uDetailStrength: { value: this.noiseParams.detailStrength },
+      uAudioMacroReactivity: { value: this.noiseParams.audioMacroReactivity },
+      uAudioDetailReactivity: { value: this.noiseParams.audioDetailReactivity },
+      uSymmetryMode: { value: this.noiseParams.symmetryMode },
+      uSymmetryWidth: { value: this.noiseParams.symmetryWidth },
+      uSymmetryStretch: { value: this.noiseParams.symmetryStretch },
       uLow: { value: 0 },
       uMid: { value: 0 },
       uHigh: { value: 0 },
@@ -530,6 +711,11 @@ export class DisplacedPlaneScene {
       uMatMetalness: { value: this.materialParams.metalness },
       uMatClearcoat: { value: this.materialParams.clearcoat },
       uMatNormalStrength: { value: this.materialParams.normalStrength },
+      uCurvatureAmount: { value: this.materialParams.curvatureAmount },
+      uCurvatureScale: { value: this.materialParams.curvatureScale },
+      uCurvaturePower: { value: this.materialParams.curvaturePower },
+      uEdgeWearStrength: { value: this.materialParams.edgeWearStrength },
+      uCavityWearStrength: { value: this.materialParams.cavityWearStrength },
       uAlbedoMap: { value: this.defaultAlbedoTexture },
       uRoughnessMap: { value: this.defaultScalarTexture },
       uMetalnessMap: { value: this.defaultScalarTexture },
@@ -641,6 +827,10 @@ export class DisplacedPlaneScene {
     this.renderer.domElement.addEventListener("pointermove", this.handlePointerMove);
     this.renderer.domElement.addEventListener("pointerdown", this.handlePointerDown);
     this.renderer.domElement.addEventListener("pointerleave", this.handlePointerLeave);
+    this.renderer.domElement.addEventListener("pointerdown", this.handleControlsPointerDown);
+    window.addEventListener("pointermove", this.handleControlsPointerMove);
+    window.addEventListener("pointerup", this.handleControlsPointerUp);
+    window.addEventListener("pointercancel", this.handleControlsPointerUp);
     this.resize();
   }
 
@@ -653,69 +843,23 @@ export class DisplacedPlaneScene {
     return texture;
   }
 
-  private createDefaultMatcapTexture(size: number): THREE.DataTexture {
-    const resolution = Math.max(64, Math.round(size));
-    const data = new Uint8Array(resolution * resolution * 4);
-    const keyDir = new THREE.Vector3(-0.28, 0.92, 0.26).normalize();
-    const fillDir = new THREE.Vector3(0.52, 0.34, 0.78).normalize();
-    const keyHalf = new THREE.Vector3(keyDir.x, keyDir.y, keyDir.z + 1).normalize();
-    const fillHalf = new THREE.Vector3(fillDir.x, fillDir.y, fillDir.z + 1).normalize();
-    const toByte = (value: number): number => Math.round(THREE.MathUtils.clamp(value, 0, 1) * 255);
-    let ptr = 0;
-
-    // Procedural "gorilla-like" dark matcap: soft top highlight, dark bottom, subtle warm/cool tint.
-    for (let y = 0; y < resolution; y += 1) {
-      const ny = 1 - (y / (resolution - 1)) * 2;
-      for (let x = 0; x < resolution; x += 1) {
-        const nx = (x / (resolution - 1)) * 2 - 1;
-        const radius = Math.hypot(nx, ny);
-        const sphere = Math.max(0, 1 - radius * radius);
-        const nz = Math.sqrt(sphere);
-
-        const keyDot = Math.max(nx * keyDir.x + ny * keyDir.y + nz * keyDir.z, 0);
-        const fillDot = Math.max(nx * fillDir.x + ny * fillDir.y + nz * fillDir.z, 0);
-        const keySpec = Math.pow(Math.max(nx * keyHalf.x + ny * keyHalf.y + nz * keyHalf.z, 0), 42);
-        const fillSpec = Math.pow(Math.max(nx * fillHalf.x + ny * fillHalf.y + nz * fillHalf.z, 0), 24);
-
-        const ambient = 0.16 + (ny * 0.5 + 0.5) * 0.22;
-        const lit = ambient + keyDot * 0.62 + fillDot * 0.18 + keySpec * 0.55 + fillSpec * 0.08;
-        const bottomFade = Math.pow(THREE.MathUtils.clamp((-ny + 0.03) / 1.03, 0, 1), 1.42);
-        const edgeFade = Math.pow(THREE.MathUtils.clamp((radius - 0.55) / 0.45, 0, 1), 1.4);
-        const tonal = lit * (1 - 0.86 * bottomFade) * (1 - 0.65 * edgeFade);
-
-        const warmTint = Math.exp(-((nx + 0.86) * (nx + 0.86) * 6.0 + (ny + 0.22) * (ny + 0.22) * 3.2)) * 0.12;
-        const coolTint = Math.exp(-((nx - 0.60) * (nx - 0.60) * 7.0 + (ny - 0.05) * (ny - 0.05) * 4.0)) * 0.16;
-        const topBloom = Math.exp(-((nx + 0.05) * (nx + 0.05) * 4.2 + (ny - 0.75) * (ny - 0.75) * 14.0)) * 0.28;
-        const baseR = 0.10 + nz * 0.14;
-        const baseG = 0.11 + nz * 0.15;
-        const baseB = 0.13 + nz * 0.16;
-
-        let r = baseR * tonal + warmTint * 0.70 + coolTint * 0.04 + topBloom * 0.95;
-        let g = baseG * tonal + warmTint * 0.28 + coolTint * 0.18 + topBloom * 0.97;
-        let b = baseB * tonal + warmTint * 0.10 + coolTint * 0.65 + topBloom * 1.02;
-
-        if (sphere <= 0) {
-          const outside = Math.pow(THREE.MathUtils.clamp(1 - (radius - 1) * 7, 0, 1), 2.4) * 0.03;
-          r = outside;
-          g = outside;
-          b = outside;
-        }
-
-        data[ptr] = toByte(r);
-        data[ptr + 1] = toByte(g);
-        data[ptr + 2] = toByte(b);
-        data[ptr + 3] = 255;
-        ptr += 4;
-      }
-    }
-
-    const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat);
+  private createDefaultMatcapTexture(_size: number): THREE.Texture {
+    const texture = this.textureLoader.load(DEFAULT_MATCAP_URL, (loaded) => {
+      loaded.colorSpace = THREE.SRGBColorSpace;
+      loaded.wrapS = THREE.ClampToEdgeWrapping;
+      loaded.wrapT = THREE.ClampToEdgeWrapping;
+      loaded.minFilter = THREE.LinearFilter;
+      loaded.magFilter = THREE.LinearFilter;
+      loaded.generateMipmaps = true;
+      loaded.needsUpdate = true;
+      this.updateMatcapTexelSize(loaded);
+    });
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
+    texture.generateMipmaps = true;
     texture.needsUpdate = true;
     return texture;
   }
@@ -735,11 +879,22 @@ export class DisplacedPlaneScene {
 
   private applyNoiseUniforms(): void {
     const baseFreq = THREE.MathUtils.clamp(this.noiseParams.baseFreq, 0.05, 1.0);
+    const domainScaleX = THREE.MathUtils.clamp(this.noiseParams.domainScaleX, 0.1, 4.0);
+    const domainScaleY = THREE.MathUtils.clamp(this.noiseParams.domainScaleY, 0.1, 4.0);
+    const domainRotation = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(this.noiseParams.domainRotationDeg, -180, 180));
     const latticeWarpFreq = THREE.MathUtils.clamp(this.noiseParams.latticeWarpFreq, 0.05, 1.0);
     const turboFreq = THREE.MathUtils.clamp(this.noiseParams.turboFreq, 0.05, 1.0);
+    const turboLacunarity = THREE.MathUtils.clamp(this.noiseParams.turboLacunarity, 1.01, 3.0);
     const driftSpeed = THREE.MathUtils.clamp(this.noiseParams.driftSpeed, 0, 0.65);
     const outputMin = Math.min(this.noiseParams.outputMin, this.noiseParams.outputMax);
     const outputMax = Math.max(this.noiseParams.outputMin, this.noiseParams.outputMax);
+    const detailFreq = THREE.MathUtils.clamp(this.noiseParams.detailFreq, 0.5, 8.0);
+    const detailStrength = THREE.MathUtils.clamp(this.noiseParams.detailStrength, 0, 2.0);
+    const audioMacroReactivity = THREE.MathUtils.clamp(this.noiseParams.audioMacroReactivity, 0, 4);
+    const audioDetailReactivity = THREE.MathUtils.clamp(this.noiseParams.audioDetailReactivity, 0, 4);
+    const symmetryMode = THREE.MathUtils.clamp(Math.round(this.noiseParams.symmetryMode), 0, 2);
+    const symmetryWidth = THREE.MathUtils.clamp(this.noiseParams.symmetryWidth, 0.001, 1.0);
+    const symmetryStretch = THREE.MathUtils.clamp(this.noiseParams.symmetryStretch, 0, 3.0);
 
     this.uniforms.uBaseFreq.value = baseFreq;
     this.uniforms.uBaseOffset.value.set(
@@ -747,11 +902,14 @@ export class DisplacedPlaneScene {
       this.noiseParams.baseOffsetY,
       this.noiseParams.baseOffsetZ,
     );
+    this.uniforms.uDomainScale.value.set(domainScaleX, domainScaleY);
+    this.uniforms.uDomainRotation.value = domainRotation;
     this.uniforms.uLatticeWarp.value = this.noiseParams.latticeWarp;
     this.uniforms.uLatticeWarpFreq.value = latticeWarpFreq;
     this.uniforms.uComplement.value = this.noiseParams.complement;
     this.uniforms.uFinalAmp.value = this.noiseParams.finalAmp;
     this.uniforms.uTurboFreq.value = turboFreq;
+    this.uniforms.uTurboLacunarity.value = turboLacunarity;
     this.uniforms.uTurboAmp.value = this.noiseParams.turboAmp;
     this.uniforms.uRoughness.value = this.noiseParams.roughness;
     this.uniforms.uAttenuation.value = THREE.MathUtils.clamp(this.noiseParams.attenuation, 0.05, 0.7);
@@ -759,6 +917,13 @@ export class DisplacedPlaneScene {
     this.uniforms.uDriftSpeed.value = driftSpeed;
     this.uniforms.uOutputMin.value = outputMin;
     this.uniforms.uOutputMax.value = outputMax;
+    this.uniforms.uDetailFreq.value = detailFreq;
+    this.uniforms.uDetailStrength.value = detailStrength;
+    this.uniforms.uAudioMacroReactivity.value = audioMacroReactivity;
+    this.uniforms.uAudioDetailReactivity.value = audioDetailReactivity;
+    this.uniforms.uSymmetryMode.value = symmetryMode;
+    this.uniforms.uSymmetryWidth.value = symmetryWidth;
+    this.uniforms.uSymmetryStretch.value = symmetryStretch;
   }
 
   private applyAudioMapUniforms(): void {
@@ -775,6 +940,104 @@ export class DisplacedPlaneScene {
     this.uniforms.uEdgeFade.value = Math.max(0.1, this.interactionParams.edgeFade);
     this.uniforms.uEdgeRadius.value = THREE.MathUtils.clamp(this.interactionParams.edgeRadius, 0.1, 0.5);
     this.uniforms.uEdgePower.value = Math.max(0.9, this.interactionParams.edgePower);
+  }
+
+  private clearCameraParallaxOffset(): void {
+    if (this.parallaxOffsetCurrent.lengthSq() <= 0.00000001) {
+      return;
+    }
+    this.camera.position.sub(this.parallaxOffsetCurrent);
+    this.controls.target.sub(this.parallaxOffsetCurrent);
+    this.parallaxOffsetCurrent.set(0, 0, 0);
+  }
+
+  private applyCameraParallax(deltaSeconds: number, elapsedSeconds: number): void {
+    const strength = THREE.MathUtils.clamp(this.interactionParams.parallaxStrength, 0, 2.0);
+    if (strength <= 0.0001 || elapsedSeconds < 0) {
+      this.parallaxOffsetTarget.set(0, 0, 0);
+      this.parallaxMoveTarget.set(0, 0);
+      this.parallaxMoveCurrent.set(0, 0);
+      return;
+    }
+
+    const inputSmoothing = 1 - Math.exp(-deltaSeconds * 24);
+    this.parallaxMoveCurrent.lerp(this.parallaxMoveTarget, inputSmoothing);
+    this.parallaxMoveTarget.multiplyScalar(Math.exp(-deltaSeconds * 10));
+    if (this.parallaxMoveTarget.lengthSq() < 0.00000001) {
+      this.parallaxMoveTarget.set(0, 0);
+    }
+
+    this.parallaxForward.copy(this.controls.target).sub(this.camera.position);
+    if (this.parallaxForward.lengthSq() < 0.00000001) {
+      this.parallaxOffsetTarget.set(0, 0, 0);
+      return;
+    }
+    this.parallaxForward.normalize();
+
+    this.parallaxRight.crossVectors(this.parallaxForward, WORLD_UP);
+    if (this.parallaxRight.lengthSq() < 0.00000001) {
+      this.parallaxRight.set(1, 0, 0);
+    } else {
+      this.parallaxRight.normalize();
+    }
+    this.parallaxUp.crossVectors(this.parallaxRight, this.parallaxForward).normalize();
+
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    const amplitude = distance * 1.9 * strength;
+    const maxOffset = distance * 0.12;
+    const offsetX = THREE.MathUtils.clamp(-this.parallaxMoveCurrent.x * amplitude, -maxOffset, maxOffset);
+    const offsetY = THREE.MathUtils.clamp(this.parallaxMoveCurrent.y * amplitude * 0.85, -maxOffset, maxOffset);
+
+    this.parallaxOffsetTarget.copy(this.parallaxRight).multiplyScalar(offsetX);
+    this.parallaxOffsetTarget.addScaledVector(this.parallaxUp, offsetY);
+
+    const smoothing = 1 - Math.exp(-deltaSeconds * 14);
+    this.parallaxOffsetCurrent.lerp(this.parallaxOffsetTarget, smoothing);
+    this.camera.position.add(this.parallaxOffsetCurrent);
+    this.controls.target.add(this.parallaxOffsetCurrent);
+  }
+
+  private applyControlsReleaseInertia(deltaSeconds: number): void {
+    if (this.controlDragActive) {
+      return;
+    }
+
+    const orbitTail = THREE.MathUtils.clamp(this.cameraParams.orbitTail, 0, 3.0);
+    const panTail = THREE.MathUtils.clamp(this.cameraParams.panTail, 0, 3.0);
+    const orbitDecay = orbitTail <= 0.0001 ? 0 : Math.exp(-(Math.log(100) / orbitTail) * deltaSeconds);
+    const panDecay = panTail <= 0.0001 ? 0 : Math.exp(-(Math.log(100) / panTail) * deltaSeconds);
+
+    const rotateSpeed = this.rotateInertiaVelocity.length();
+    if (rotateSpeed > 0.000001) {
+      const yaw = this.rotateInertiaVelocity.x * deltaSeconds;
+      const pitch = this.rotateInertiaVelocity.y * deltaSeconds;
+
+      this.rotateInertiaOffset.copy(this.camera.position).sub(this.controls.target);
+      if (this.rotateInertiaOffset.lengthSq() > 0.00000001) {
+        this.rotateInertiaOffset.applyAxisAngle(WORLD_UP, -yaw);
+        this.rotateInertiaAxis.crossVectors(WORLD_UP, this.rotateInertiaOffset);
+        if (this.rotateInertiaAxis.lengthSq() > 0.00000001) {
+          this.rotateInertiaAxis.normalize();
+          this.rotateInertiaOffset.applyAxisAngle(this.rotateInertiaAxis, -pitch);
+        }
+        this.camera.position.copy(this.controls.target).add(this.rotateInertiaOffset);
+      }
+
+      this.rotateInertiaVelocity.multiplyScalar(orbitDecay);
+      if (this.rotateInertiaVelocity.lengthSq() < 0.00000001) {
+        this.rotateInertiaVelocity.set(0, 0);
+      }
+    }
+
+    const panSpeed = this.panInertiaVelocity.length();
+    if (panSpeed > 0.000001) {
+      this.camera.position.addScaledVector(this.panInertiaVelocity, deltaSeconds);
+      this.controls.target.addScaledVector(this.panInertiaVelocity, deltaSeconds);
+      this.panInertiaVelocity.multiplyScalar(panDecay);
+      if (this.panInertiaVelocity.lengthSq() < 0.00000001) {
+        this.panInertiaVelocity.set(0, 0, 0);
+      }
+    }
   }
 
   private enforceCameraTargetBounds(): void {
@@ -803,6 +1066,8 @@ export class DisplacedPlaneScene {
     const maxDistance = THREE.MathUtils.clamp(this.cameraParams.maxDistance, minDistance + 0.1, 120);
     const minPolarDeg = THREE.MathUtils.clamp(this.cameraParams.minPolarDeg, 0, 89);
     const maxPolarDeg = THREE.MathUtils.clamp(this.cameraParams.maxPolarDeg, minPolarDeg, 89);
+    this.cameraParams.orbitTail = THREE.MathUtils.clamp(this.cameraParams.orbitTail, 0, 3.0);
+    this.cameraParams.panTail = THREE.MathUtils.clamp(this.cameraParams.panTail, 0, 3.0);
 
     this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
@@ -829,6 +1094,11 @@ export class DisplacedPlaneScene {
     this.uniforms.uMatMetalness.value = this.materialParams.metalness;
     this.uniforms.uMatClearcoat.value = this.materialParams.clearcoat;
     this.uniforms.uMatNormalStrength.value = this.materialParams.normalStrength;
+    this.uniforms.uCurvatureAmount.value = this.materialParams.curvatureAmount;
+    this.uniforms.uCurvatureScale.value = this.materialParams.curvatureScale;
+    this.uniforms.uCurvaturePower.value = this.materialParams.curvaturePower;
+    this.uniforms.uEdgeWearStrength.value = this.materialParams.edgeWearStrength;
+    this.uniforms.uCavityWearStrength.value = this.materialParams.cavityWearStrength;
     this.uniforms.uMatcapBrightness.value = this.materialParams.matcapBrightness;
     this.uniforms.uMatcapBlur.value = this.materialParams.matcapBlur;
     this.uniforms.uMatcapContrast.value = this.materialParams.matcapContrast;
@@ -1059,27 +1329,22 @@ export class DisplacedPlaneScene {
   }
 
   setQualityParam(key: keyof QualityParams, value: number): void {
-    if (key === "subdivisions") {
-      const next = THREE.MathUtils.clamp(Math.round(value), 512, 1600);
-      if (next === this.qualityParams.subdivisions) {
-        return;
-      }
-      this.qualityParams.subdivisions = next;
-      const nextGeometry = this.createGeometry(next);
-      const nextUnderlayGeometry = this.createGeometry(next);
-      this.mesh.geometry.dispose();
-      this.mesh.geometry = nextGeometry;
-      this.geometry = nextGeometry;
-      this.underlayMesh.geometry.dispose();
-      this.underlayMesh.geometry = nextUnderlayGeometry;
-      this.underlayGeometry = nextUnderlayGeometry;
+    if (key !== "subdivisions") {
       return;
     }
-
-    if (key === "pixelRatioMax") {
-      this.qualityParams.pixelRatioMax = value;
-      this.resize();
+    const next = THREE.MathUtils.clamp(Math.round(value), 512, 1600);
+    if (next === this.qualityParams.subdivisions) {
+      return;
     }
+    this.qualityParams.subdivisions = next;
+    const nextGeometry = this.createGeometry(next);
+    const nextUnderlayGeometry = this.createGeometry(next);
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = nextGeometry;
+    this.geometry = nextGeometry;
+    this.underlayMesh.geometry.dispose();
+    this.underlayMesh.geometry = nextUnderlayGeometry;
+    this.underlayGeometry = nextUnderlayGeometry;
   }
 
   getAudioMapParams(): AudioMapParams {
@@ -1118,8 +1383,11 @@ export class DisplacedPlaneScene {
     this.uniforms.uMid.value = this.audioMid;
     this.uniforms.uHigh.value = this.audioHigh;
 
+    this.clearCameraParallaxOffset();
+    this.applyControlsReleaseInertia(deltaSeconds);
     this.controls.update();
     this.enforceCameraTargetBounds();
+    this.applyCameraParallax(deltaSeconds, elapsedSeconds);
     if (this.ambientOcclusionParams.mode === "gtao") {
       this.renderAODepthBuffer();
     }
@@ -1129,7 +1397,7 @@ export class DisplacedPlaneScene {
   resize(): void {
     const width = this.container.clientWidth;
     const height = Math.max(this.container.clientHeight, 1);
-    const dpr = Math.min(window.devicePixelRatio, this.qualityParams.pixelRatioMax);
+    const dpr = 1;
 
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(width, height, false);
@@ -1144,6 +1412,10 @@ export class DisplacedPlaneScene {
     this.renderer.domElement.removeEventListener("pointermove", this.handlePointerMove);
     this.renderer.domElement.removeEventListener("pointerdown", this.handlePointerDown);
     this.renderer.domElement.removeEventListener("pointerleave", this.handlePointerLeave);
+    this.renderer.domElement.removeEventListener("pointerdown", this.handleControlsPointerDown);
+    window.removeEventListener("pointermove", this.handleControlsPointerMove);
+    window.removeEventListener("pointerup", this.handleControlsPointerUp);
+    window.removeEventListener("pointercancel", this.handleControlsPointerUp);
 
     this.controls.dispose();
     this.backgroundFloorGeometry.dispose();

@@ -501,15 +501,7 @@ export function createControlPanel(
     precision: 0,
     changeOnly: true,
   }, callbacks.onQualityParamChange);
-  bindRange(unifiedBody, qualityParams, "pixelRatioMax", {
-    label: "Pixel Ratio Max",
-    min: 1,
-    max: 2,
-    step: 0.05,
-    precision: 2,
-  }, callbacks.onQualityParamChange);
-
-  const turboFolder = createFolder("Turbo Noise", true);
+  const turboFolder = createFolder("AFTER FORM NOISE", true);
   const turboBody = requireElement<HTMLDivElement>(turboFolder, ".folder-body");
   bindRange(turboBody, noiseParams, "turboFreq", {
     label: "Frequency",
@@ -545,6 +537,109 @@ export function createControlPanel(
     max: 8,
     step: 1,
     precision: 0,
+  }, callbacks.onNoiseParamChange);
+
+  const advancedNoiseFolder = createFolder("Advanced Noise", false);
+  const advancedNoiseBody = requireElement<HTMLDivElement>(advancedNoiseFolder, ".folder-body");
+  const symmetryModeRow = document.createElement("div");
+  symmetryModeRow.className = "control-row";
+  const symmetryModeLabel = document.createElement("label");
+  symmetryModeLabel.className = "control-label";
+  symmetryModeLabel.textContent = "Symmetry";
+  const symmetryModeSelect = document.createElement("select");
+  symmetryModeSelect.className = "control-select";
+  const symmetryModeOptions: Array<{ label: string; value: number }> = [
+    { label: "Off", value: 0 },
+    { label: "Single", value: 1 },
+    { label: "Cross", value: 2 },
+  ];
+  for (const optionData of symmetryModeOptions) {
+    const option = document.createElement("option");
+    option.value = String(optionData.value);
+    option.textContent = optionData.label;
+    option.selected = Math.round(noiseParams.symmetryMode) === optionData.value;
+    symmetryModeSelect.appendChild(option);
+  }
+  const onSymmetryModeChange = (): void => {
+    const value = Number(symmetryModeSelect.value);
+    noiseParams.symmetryMode = value;
+    callbacks.onNoiseParamChange("symmetryMode", value);
+  };
+  symmetryModeSelect.addEventListener("change", onSymmetryModeChange);
+  cleanup.push(() => symmetryModeSelect.removeEventListener("change", onSymmetryModeChange));
+  symmetryModeRow.appendChild(symmetryModeLabel);
+  symmetryModeRow.appendChild(symmetryModeSelect);
+  advancedNoiseBody.appendChild(symmetryModeRow);
+  bindRange(advancedNoiseBody, noiseParams, "symmetryWidth", {
+    label: "Symmetry Width",
+    min: 0.001,
+    max: 1.0,
+    step: 0.001,
+    precision: 3,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "symmetryStretch", {
+    label: "Symmetry Stretch",
+    min: 0,
+    max: 3.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "domainScaleX", {
+    label: "Domain Scale X",
+    min: 0.1,
+    max: 4.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "domainScaleY", {
+    label: "Domain Scale Y",
+    min: 0.1,
+    max: 4.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "domainRotationDeg", {
+    label: "Domain Rotate",
+    min: -180,
+    max: 180,
+    step: 1,
+    precision: 0,
+    suffix: "deg",
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "turboLacunarity", {
+    label: "Turbo Lacunarity",
+    min: 1.01,
+    max: 3.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "detailFreq", {
+    label: "Detail Frequency",
+    min: 0.5,
+    max: 8.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "detailStrength", {
+    label: "Detail Strength",
+    min: 0,
+    max: 2.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "audioMacroReactivity", {
+    label: "Macro Reactivity",
+    min: 0,
+    max: 4.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(advancedNoiseBody, noiseParams, "audioDetailReactivity", {
+    label: "Detail Reactivity",
+    min: 0,
+    max: 4.0,
+    step: 0.01,
+    precision: 2,
   }, callbacks.onNoiseParamChange);
 
   const audioFolder = createFolder("Audio Mapping", true);
@@ -615,6 +710,13 @@ export function createControlPanel(
     "Mouse Noise Offset",
     callbacks.onInteractionParamChange,
   );
+  bindRange(interactionBody, interactionParams, "parallaxStrength", {
+    label: "Parallax",
+    min: 0,
+    max: 2.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onInteractionParamChange);
   bindRange(interactionBody, interactionParams, "edgeFade", {
     label: "Edge Fade",
     min: 0.1,
@@ -685,6 +787,22 @@ export function createControlPanel(
     step: 0.1,
     precision: 1,
   }, callbacks.onCameraParamChange);
+  bindRange(cameraBody, cameraParams, "orbitTail", {
+    label: "Orbit Tail",
+    min: 0,
+    max: 3.0,
+    step: 0.01,
+    precision: 2,
+    suffix: "s",
+  }, callbacks.onCameraParamChange);
+  bindRange(cameraBody, cameraParams, "panTail", {
+    label: "Pan Tail",
+    min: 0,
+    max: 3.0,
+    step: 0.01,
+    precision: 2,
+    suffix: "s",
+  }, callbacks.onCameraParamChange);
 
   const materialFolder = createFolder("Material", true);
   const materialBody = requireElement<HTMLDivElement>(materialFolder, ".folder-body");
@@ -752,6 +870,41 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onMaterialParamChange);
+  bindRange(pbrMaterialBody, materialParams, "curvatureAmount", {
+    label: "Curvature Amount",
+    min: 0,
+    max: 1.5,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(pbrMaterialBody, materialParams, "curvatureScale", {
+    label: "Curvature Scale",
+    min: 0,
+    max: 16,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(pbrMaterialBody, materialParams, "curvaturePower", {
+    label: "Curvature Power",
+    min: 0.1,
+    max: 4,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(pbrMaterialBody, materialParams, "edgeWearStrength", {
+    label: "Edge Wear",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(pbrMaterialBody, materialParams, "cavityWearStrength", {
+    label: "Cavity Wear",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
 
   bindRange(matcapMaterialBody, materialParams, "matcapBrightness", {
     label: "Matcap Brightness",
@@ -776,6 +929,41 @@ export function createControlPanel(
   }, callbacks.onMaterialParamChange);
   bindRange(matcapMaterialBody, materialParams, "matcapSaturation", {
     label: "Matcap Saturation",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "curvatureAmount", {
+    label: "Curvature Amount",
+    min: 0,
+    max: 1.5,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "curvatureScale", {
+    label: "Curvature Scale",
+    min: 0,
+    max: 16,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "curvaturePower", {
+    label: "Curvature Power",
+    min: 0.1,
+    max: 4,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "edgeWearStrength", {
+    label: "Edge Wear",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onMaterialParamChange);
+  bindRange(matcapMaterialBody, materialParams, "cavityWearStrength", {
+    label: "Cavity Wear",
     min: 0,
     max: 2,
     step: 0.01,
@@ -902,6 +1090,7 @@ export function createControlPanel(
   }, callbacks.onShadingParamChange);
   tabPanels.noise.appendChild(unifiedFolder);
   tabPanels.noise.appendChild(turboFolder);
+  tabPanels.noise.appendChild(advancedNoiseFolder);
   tabPanels.audio.appendChild(audioFolder);
   tabPanels.shader.appendChild(materialFolder);
   tabPanels.shader.appendChild(aoFolder);

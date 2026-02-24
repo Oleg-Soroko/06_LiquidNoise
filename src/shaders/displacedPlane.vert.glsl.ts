@@ -7,18 +7,28 @@ uniform float uTime;
 
 uniform float uBaseFreq;
 uniform vec3 uBaseOffset;
+uniform vec2 uDomainScale;
+uniform float uDomainRotation;
 uniform float uLatticeWarp;
 uniform float uLatticeWarpFreq;
 uniform float uComplement;
 uniform float uFinalAmp;
 
 uniform float uTurboFreq;
+uniform float uTurboLacunarity;
 uniform float uTurboAmp;
 uniform float uRoughness;
 uniform float uAttenuation;
 uniform float uTurbulence;
 uniform float uOutputMin;
 uniform float uOutputMax;
+uniform float uDetailFreq;
+uniform float uDetailStrength;
+uniform float uAudioMacroReactivity;
+uniform float uAudioDetailReactivity;
+uniform float uSymmetryMode;
+uniform float uSymmetryWidth;
+uniform float uSymmetryStretch;
 
 uniform float uLow;
 uniform float uMid;
@@ -140,13 +150,14 @@ vec3 warpVector(vec3 p) {
 
 float alligatorTurbulence(vec3 p) {
   float sum = 0.0;
-  float amp = max(0.0, uTurboAmp);
+  float gain = max(0.0, uTurboAmp);
+  float octaveAmp = 1.0;
   float freq = max(0.0001, uTurboFreq);
   float norm = 0.0;
   float roughPow = mix(0.9, 3.5, clamp(uRoughness, 0.0, 1.0));
   float atten = clamp(uAttenuation, 0.05, 0.7);
 
-  if (amp <= 0.000001) {
+  if (gain <= 0.000001) {
     return 0.0;
   }
 
@@ -154,16 +165,44 @@ float alligatorTurbulence(vec3 p) {
     float enabled = step(float(i), uTurbulence - 0.5);
     float n = abs(snoise(p * freq + vec3(float(i) * 7.13, float(i) * 3.11, float(i) * 5.23)));
     n = pow(clamp(n, 0.0, 1.0), roughPow);
-    sum += n * amp * enabled;
-    norm += amp * enabled;
-    freq *= 1.92;
-    amp *= atten;
+    sum += n * octaveAmp * enabled;
+    norm += octaveAmp * enabled;
+    freq *= max(1.01, uTurboLacunarity);
+    octaveAmp *= atten;
   }
 
   if (norm <= 0.0) {
     return 0.0;
   }
-  return sum / norm;
+  return clamp((sum / norm) * gain, 0.0, 1.0);
+}
+
+float softAbs(float x, float width) {
+  float w = max(0.0001, width);
+  return sqrt(x * x + w * w) - w;
+}
+
+float softSymmetryAxis(float coord, float width, float stretch) {
+  float absCoord = abs(coord);
+  float mirrored = softAbs(coord, width);
+  float nearAxis = 1.0 - smoothstep(width * 0.6, width * 3.5, absCoord);
+  return mirrored + nearAxis * max(0.0, stretch) * width;
+}
+
+vec2 applySymmetry(vec2 p) {
+  float mode = floor(uSymmetryMode + 0.5);
+  if (mode < 0.5) {
+    return p;
+  }
+
+  float width = max(0.0001, uSymmetryWidth);
+  float stretch = max(0.0, uSymmetryStretch);
+  p.x = softSymmetryAxis(p.x, width, stretch);
+
+  if (mode > 1.5) {
+    p.y = softSymmetryAxis(p.y, width, stretch);
+  }
+  return p;
 }
 
 float edgePin(vec2 uv, float audioEdge) {
@@ -179,7 +218,14 @@ float edgePin(vec2 uv, float audioEdge) {
 void main() {
   vUv = uv;
 
-  vec3 basePos = vec3(position.xy, uTime * uDriftSpeed) + uBaseOffset;
+  float domainAngle = uDomainRotation;
+  float dc = cos(domainAngle);
+  float ds = sin(domainAngle);
+  mat2 domainRotate = mat2(dc, -ds, ds, dc);
+  vec2 domainScaled = position.xy * max(abs(uDomainScale), vec2(0.0001));
+  vec2 domainPos = domainRotate * domainScaled;
+  vec2 symmetryPos = applySymmetry(domainPos);
+  vec3 basePos = vec3(symmetryPos, uTime * uDriftSpeed) + uBaseOffset;
   vec3 simplexInput = basePos * max(0.0001, uBaseFreq);
   if (uMouseNoiseOffset > 0.5) {
     float moveLen = length(uMouseMoveDir);
@@ -198,17 +244,17 @@ void main() {
   float alligator01 = clamp(alligatorTurbulence(alligatorPos), 0.0, 1.0);
   float finalRemap = mix(uOutputMin, uOutputMax, alligator01);
 
-  float macroAudio = 1.0 + (uLow * uLowGain + uMid * uMidGain) * uGlobalGain;
+  float macroAudio = 1.0 + (uLow * uLowGain + uMid * uMidGain) * uGlobalGain * uAudioMacroReactivity;
   float edgeAudio = clamp(
     (uLow * uLowGain + uMid * uMidGain + uHigh * uHighGain) * uGlobalGain * 0.35,
     0.0,
     1.0
   );
   float fine = snoise(
-    simplexWarped * 3.35 +
+    simplexWarped * max(0.0001, uDetailFreq) +
     vec3(0.0, 0.0, uTime * (uDriftSpeed * 1.9 + 0.03))
   );
-  float audioShape = finalRemap * macroAudio + fine * uHigh * uHighGain * uGlobalGain * 0.45;
+  float audioShape = finalRemap * macroAudio + fine * uHigh * uHighGain * uGlobalGain * uDetailStrength * uAudioDetailReactivity;
 
   float distToMouse = distance(vUv, uMouseUv);
   float radius = max(0.5, uMouseRadius);
