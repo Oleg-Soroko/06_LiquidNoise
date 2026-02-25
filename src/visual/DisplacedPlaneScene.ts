@@ -8,6 +8,7 @@ import { displacedPlaneFragmentShader } from "../shaders/displacedPlane.frag.gls
 import { displacedPlaneVertexShader } from "../shaders/displacedPlane.vert.glsl";
 
 export interface HoudiniNoiseParams {
+  noiseCore: number;
   baseFreq: number;
   baseOffsetX: number;
   baseOffsetY: number;
@@ -23,6 +24,8 @@ export interface HoudiniNoiseParams {
   turboLacunarity: number;
   turboAmp: number;
   roughness: number;
+  ridgeAmount: number;
+  contrast: number;
   attenuation: number;
   turbulence: number;
   outputMin: number;
@@ -81,7 +84,6 @@ export interface MaterialParams {
   clearcoat: number;
   normalStrength: number;
   matcapBrightness: number;
-  matcapBlur: number;
   matcapContrast: number;
   matcapSaturation: number;
 }
@@ -115,6 +117,7 @@ export interface ShadingParams {
 }
 
 export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
+  noiseCore: 0,
   baseFreq: 0.32,
   baseOffsetX: -8.0,
   baseOffsetY: -8.0,
@@ -130,6 +133,8 @@ export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
   turboLacunarity: 1.92,
   turboAmp: 1.0,
   roughness: 0.1,
+  ridgeAmount: 0.0,
+  contrast: 1.0,
   attenuation: 0.42,
   turbulence: 8.0,
   outputMin: -0.06,
@@ -188,7 +193,6 @@ export const DEFAULT_MATERIAL_PARAMS: MaterialParams = {
   clearcoat: 0.0,
   normalStrength: 0.0,
   matcapBrightness: 2.22,
-  matcapBlur: 0.0,
   matcapContrast: 1.0,
   matcapSaturation: 1.0,
 };
@@ -246,12 +250,13 @@ const FLOOR_OPACITY = 1.0;
 const BACKGROUND_HOLE_EXTRA = 0.03;
 const BACKGROUND_CIRCLE_RADIUS = 100000;
 const BACKGROUND_CIRCLE_FADE = 1;
-const DEFAULT_MATCAP_SIZE = 512;
 const DEFAULT_MATCAP_URL = "/gorilla2.jpg";
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const BASE_FREQ_SMOOTHING_HZ = 14;
 
 interface PlaneUniforms {
   uTime: THREE.IUniform<number>;
+  uNoiseCore: THREE.IUniform<number>;
   uBaseFreq: THREE.IUniform<number>;
   uBaseOffset: THREE.IUniform<THREE.Vector3>;
   uDomainScale: THREE.IUniform<THREE.Vector2>;
@@ -264,6 +269,8 @@ interface PlaneUniforms {
   uTurboLacunarity: THREE.IUniform<number>;
   uTurboAmp: THREE.IUniform<number>;
   uRoughness: THREE.IUniform<number>;
+  uRidgeAmount: THREE.IUniform<number>;
+  uContrast: THREE.IUniform<number>;
   uAttenuation: THREE.IUniform<number>;
   uTurbulence: THREE.IUniform<number>;
   uOutputMin: THREE.IUniform<number>;
@@ -317,10 +324,8 @@ interface PlaneUniforms {
   uUseNormalMap: THREE.IUniform<number>;
   uUseMatcapMap: THREE.IUniform<number>;
   uMatcapBrightness: THREE.IUniform<number>;
-  uMatcapBlur: THREE.IUniform<number>;
   uMatcapContrast: THREE.IUniform<number>;
   uMatcapSaturation: THREE.IUniform<number>;
-  uMatcapTexelSize: THREE.IUniform<THREE.Vector2>;
   uKeyDir: THREE.IUniform<THREE.Vector3>;
   uFillDir: THREE.IUniform<THREE.Vector3>;
   uKeyStrength: THREE.IUniform<number>;
@@ -389,6 +394,9 @@ export class DisplacedPlaneScene {
   private audioLow = 0;
   private audioMid = 0;
   private audioHigh = 0;
+  private baseFreqCurrent = DEFAULT_NOISE_PARAMS.baseFreq;
+  private baseFreqTarget = DEFAULT_NOISE_PARAMS.baseFreq;
+  private soloNoisePlane = false;
 
   readonly renderer: THREE.WebGLRenderer;
 
@@ -571,6 +579,8 @@ export class DisplacedPlaneScene {
   constructor(options: DisplacedPlaneSceneOptions) {
     this.container = options.container;
     this.noiseParams = { ...options.noiseParams };
+    this.baseFreqTarget = THREE.MathUtils.clamp(this.noiseParams.baseFreq, 0.05, 1.0);
+    this.baseFreqCurrent = this.baseFreqTarget;
     this.audioMapParams = { ...options.audioMapParams };
     this.interactionParams = { ...options.interactionParams };
     this.qualityParams = { ...options.qualityParams };
@@ -582,7 +592,7 @@ export class DisplacedPlaneScene {
     this.defaultAlbedoTexture = this.createSolidTexture(255, 255, 255, THREE.SRGBColorSpace);
     this.defaultScalarTexture = this.createSolidTexture(255, 255, 255, THREE.NoColorSpace);
     this.defaultNormalTexture = this.createSolidTexture(128, 128, 255, THREE.NoColorSpace);
-    this.defaultMatcapTexture = this.createDefaultMatcapTexture(DEFAULT_MATCAP_SIZE);
+    this.defaultMatcapTexture = this.createDefaultMatcapTexture();
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -627,7 +637,8 @@ export class DisplacedPlaneScene {
 
     this.uniforms = {
       uTime: { value: 0 },
-      uBaseFreq: { value: this.noiseParams.baseFreq },
+      uNoiseCore: { value: THREE.MathUtils.clamp(Math.round(this.noiseParams.noiseCore), 0, 2) },
+      uBaseFreq: { value: this.baseFreqCurrent },
       uBaseOffset: {
         value: new THREE.Vector3(
           this.noiseParams.baseOffsetX,
@@ -645,6 +656,8 @@ export class DisplacedPlaneScene {
       uTurboLacunarity: { value: this.noiseParams.turboLacunarity },
       uTurboAmp: { value: this.noiseParams.turboAmp },
       uRoughness: { value: this.noiseParams.roughness },
+      uRidgeAmount: { value: this.noiseParams.ridgeAmount },
+      uContrast: { value: this.noiseParams.contrast },
       uAttenuation: { value: this.noiseParams.attenuation },
       uTurbulence: { value: this.noiseParams.turbulence },
       uOutputMin: { value: this.noiseParams.outputMin },
@@ -703,10 +716,8 @@ export class DisplacedPlaneScene {
       uUseNormalMap: { value: 0 },
       uUseMatcapMap: { value: 1 },
       uMatcapBrightness: { value: this.materialParams.matcapBrightness },
-      uMatcapBlur: { value: this.materialParams.matcapBlur },
       uMatcapContrast: { value: this.materialParams.matcapContrast },
       uMatcapSaturation: { value: this.materialParams.matcapSaturation },
-      uMatcapTexelSize: { value: new THREE.Vector2(1 / DEFAULT_MATCAP_SIZE, 1 / DEFAULT_MATCAP_SIZE) },
       uKeyDir: { value: new THREE.Vector3(0, 1, 0) },
       uFillDir: { value: new THREE.Vector3(0, 1, 0) },
       uKeyStrength: { value: this.shadingParams.keyStrength },
@@ -790,6 +801,7 @@ export class DisplacedPlaneScene {
     this.underlayMesh.renderOrder = 0;
     this.scene.add(this.underlayMesh);
 
+    this.applySceneVisibility();
     this.applyNoiseUniforms();
     this.applyAudioMapUniforms();
     this.applyInteractionUniforms();
@@ -817,7 +829,7 @@ export class DisplacedPlaneScene {
     return texture;
   }
 
-  private createDefaultMatcapTexture(_size: number): THREE.Texture {
+  private createDefaultMatcapTexture(): THREE.Texture {
     const texture = this.textureLoader.load(DEFAULT_MATCAP_URL, (loaded) => {
       loaded.colorSpace = THREE.SRGBColorSpace;
       loaded.wrapS = THREE.ClampToEdgeWrapping;
@@ -826,7 +838,6 @@ export class DisplacedPlaneScene {
       loaded.magFilter = THREE.LinearFilter;
       loaded.generateMipmaps = true;
       loaded.needsUpdate = true;
-      this.updateMatcapTexelSize(loaded);
     });
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -852,6 +863,7 @@ export class DisplacedPlaneScene {
   }
 
   private applyNoiseUniforms(): void {
+    const noiseCore = THREE.MathUtils.clamp(Math.round(this.noiseParams.noiseCore), 0, 2);
     const baseFreq = THREE.MathUtils.clamp(this.noiseParams.baseFreq, 0.05, 1.0);
     const domainScaleX = THREE.MathUtils.clamp(this.noiseParams.domainScaleX, 0.1, 4.0);
     const domainScaleY = THREE.MathUtils.clamp(this.noiseParams.domainScaleY, 0.1, 4.0);
@@ -859,6 +871,10 @@ export class DisplacedPlaneScene {
     const latticeWarpFreq = THREE.MathUtils.clamp(this.noiseParams.latticeWarpFreq, 0.05, 1.0);
     const turboFreq = THREE.MathUtils.clamp(this.noiseParams.turboFreq, 0.05, 1.0);
     const turboLacunarity = THREE.MathUtils.clamp(this.noiseParams.turboLacunarity, 1.01, 3.0);
+    const turboAmp = THREE.MathUtils.clamp(this.noiseParams.turboAmp, 0, 3.0);
+    const ridgeAmount = THREE.MathUtils.clamp(this.noiseParams.ridgeAmount, 0, 1.0);
+    const contrast = THREE.MathUtils.clamp(this.noiseParams.contrast, 0, 4.0);
+    const turbulence = THREE.MathUtils.clamp(this.noiseParams.turbulence, 1, 8.0);
     const driftSpeed = THREE.MathUtils.clamp(this.noiseParams.driftSpeed, 0, 0.65);
     const outputMin = Math.min(this.noiseParams.outputMin, this.noiseParams.outputMax);
     const outputMax = Math.max(this.noiseParams.outputMin, this.noiseParams.outputMax);
@@ -870,7 +886,8 @@ export class DisplacedPlaneScene {
     const symmetryWidth = THREE.MathUtils.clamp(this.noiseParams.symmetryWidth, 0.001, 1.0);
     const symmetryStretch = THREE.MathUtils.clamp(this.noiseParams.symmetryStretch, 0, 3.0);
 
-    this.uniforms.uBaseFreq.value = baseFreq;
+    this.uniforms.uNoiseCore.value = noiseCore;
+    this.baseFreqTarget = baseFreq;
     this.uniforms.uBaseOffset.value.set(
       this.noiseParams.baseOffsetX,
       this.noiseParams.baseOffsetY,
@@ -884,10 +901,12 @@ export class DisplacedPlaneScene {
     this.uniforms.uFinalAmp.value = this.noiseParams.finalAmp;
     this.uniforms.uTurboFreq.value = turboFreq;
     this.uniforms.uTurboLacunarity.value = turboLacunarity;
-    this.uniforms.uTurboAmp.value = this.noiseParams.turboAmp;
+    this.uniforms.uTurboAmp.value = turboAmp;
     this.uniforms.uRoughness.value = this.noiseParams.roughness;
+    this.uniforms.uRidgeAmount.value = ridgeAmount;
+    this.uniforms.uContrast.value = contrast;
     this.uniforms.uAttenuation.value = THREE.MathUtils.clamp(this.noiseParams.attenuation, 0.05, 0.7);
-    this.uniforms.uTurbulence.value = this.noiseParams.turbulence;
+    this.uniforms.uTurbulence.value = turbulence;
     this.uniforms.uDriftSpeed.value = driftSpeed;
     this.uniforms.uOutputMin.value = outputMin;
     this.uniforms.uOutputMax.value = outputMax;
@@ -1061,7 +1080,6 @@ export class DisplacedPlaneScene {
     if (this.uniforms.uUseMatcapMap.value < 0.5) {
       this.uniforms.uMatcapMap.value = this.defaultMatcapTexture;
       this.uniforms.uUseMatcapMap.value = 1;
-      this.updateMatcapTexelSize(this.defaultMatcapTexture);
     }
     this.uniforms.uMatDiffuse.value = this.materialParams.diffuse;
     this.uniforms.uMatRoughness.value = this.materialParams.roughness;
@@ -1069,16 +1087,8 @@ export class DisplacedPlaneScene {
     this.uniforms.uMatClearcoat.value = this.materialParams.clearcoat;
     this.uniforms.uMatNormalStrength.value = this.materialParams.normalStrength;
     this.uniforms.uMatcapBrightness.value = this.materialParams.matcapBrightness;
-    this.uniforms.uMatcapBlur.value = this.materialParams.matcapBlur;
     this.uniforms.uMatcapContrast.value = this.materialParams.matcapContrast;
     this.uniforms.uMatcapSaturation.value = this.materialParams.matcapSaturation;
-  }
-
-  private updateMatcapTexelSize(texture: THREE.Texture): void {
-    const image = texture.image as { width?: number; height?: number } | undefined;
-    const width = typeof image?.width === "number" && image.width > 0 ? image.width : 1;
-    const height = typeof image?.height === "number" && image.height > 0 ? image.height : 1;
-    this.uniforms.uMatcapTexelSize.value.set(1 / width, 1 / height);
   }
 
   private setMaterialMapTexture(slot: MaterialMapSlot, texture: THREE.Texture, enabled: number): void {
@@ -1109,7 +1119,6 @@ export class DisplacedPlaneScene {
     }
     this.uniforms.uMatcapMap.value = texture;
     this.uniforms.uUseMatcapMap.value = enabled;
-    this.updateMatcapTexelSize(texture);
   }
 
   async setMaterialMap(slot: MaterialMapSlot, file: File | null): Promise<void> {
@@ -1213,6 +1222,14 @@ export class DisplacedPlaneScene {
     }
   }
 
+  private applySceneVisibility(): void {
+    this.mesh.visible = true;
+    const otherMeshesVisible = !this.soloNoisePlane;
+    this.underlayMesh.visible = otherMeshesVisible;
+    this.floorMesh.visible = otherMeshesVisible;
+    this.backgroundFloorMesh.visible = otherMeshesVisible;
+  }
+
   private renderAODepthBuffer(): void {
     const previousTarget = this.renderer.getRenderTarget();
     const previousAutoClear = this.renderer.autoClear;
@@ -1255,6 +1272,11 @@ export class DisplacedPlaneScene {
   setNoiseParam(key: keyof HoudiniNoiseParams, value: number): void {
     this.noiseParams[key] = value;
     this.applyNoiseUniforms();
+  }
+
+  setSoloNoisePlane(enabled: boolean): void {
+    this.soloNoisePlane = enabled;
+    this.applySceneVisibility();
   }
 
   setAudioMapParam(key: keyof AudioMapParams, value: number): void {
@@ -1340,7 +1362,17 @@ export class DisplacedPlaneScene {
       }
     }
 
+    // Smooth base frequency in log-space so size changes feel continuous.
+    const baseFreqSmoothing = 1 - Math.exp(-deltaSeconds * BASE_FREQ_SMOOTHING_HZ);
+    const baseFreqCurrent = Math.max(0.0001, this.baseFreqCurrent);
+    const baseFreqTarget = Math.max(0.0001, this.baseFreqTarget);
+    const nextBaseFreq = Math.exp(
+      THREE.MathUtils.lerp(Math.log(baseFreqCurrent), Math.log(baseFreqTarget), baseFreqSmoothing),
+    );
+    this.baseFreqCurrent = Math.abs(nextBaseFreq - baseFreqTarget) < 0.00001 ? baseFreqTarget : nextBaseFreq;
+
     this.uniforms.uTime.value = elapsedSeconds;
+    this.uniforms.uBaseFreq.value = this.baseFreqCurrent;
     this.uniforms.uMouseHover.value = this.mouseStrengthCurrent;
     this.uniforms.uPulseAge.value = this.pulseAge;
     this.uniforms.uLow.value = this.audioLow;

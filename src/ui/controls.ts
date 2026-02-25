@@ -42,6 +42,7 @@ export interface ControlCallbacks {
   onAmbientOcclusionModeChange(mode: AmbientOcclusionMode): void;
   onAmbientOcclusionParamChange(key: Exclude<keyof AmbientOcclusionParams, "mode">, value: number): void;
   onShadingParamChange(key: keyof ShadingParams, value: number): void;
+  onSoloNoisePlaneToggle(enabled: boolean): void;
 }
 
 export interface ControlPanelApi {
@@ -170,6 +171,7 @@ export function createControlPanel(
   let ambientOcclusionMode: AmbientOcclusionMode = initialState.ambientOcclusionParams.mode;
   const ambientOcclusionParams: AmbientOcclusionParams = { ...initialState.ambientOcclusionParams };
   const shadingParams: ShadingParams = { ...initialState.shadingParams };
+  const soloNoisePlaneToggleState = { enabled: 0 };
 
   const cleanup: Array<() => void> = [];
 
@@ -985,12 +987,38 @@ export function createControlPanel(
 
   const unifiedFolder = createFolder("MAIN NOISE", true);
   const unifiedBody = requireElement<HTMLDivElement>(unifiedFolder, ".folder-body");
+  type NoiseCoreOption = "simplex" | "openSimplex" | "openSimplexFixed";
+  const toNoiseCoreOption = (value: number): NoiseCoreOption => {
+    const mode = Math.round(value);
+    if (mode === 1) {
+      return "openSimplex";
+    }
+    if (mode >= 2) {
+      return "openSimplexFixed";
+    }
+    return "simplex";
+  };
+  bindSelect<NoiseCoreOption>(
+    unifiedBody,
+    "Noise Core",
+    [
+      { label: "Type 1", value: "simplex" },
+      { label: "Type 2", value: "openSimplex" },
+      { label: "Type 3", value: "openSimplexFixed" },
+    ],
+    toNoiseCoreOption(noiseParams.noiseCore),
+    (value): void => {
+      const numericValue = value === "openSimplex" ? 1 : value === "openSimplexFixed" ? 2 : 0;
+      noiseParams.noiseCore = numericValue;
+      callbacks.onNoiseParamChange("noiseCore", numericValue);
+    },
+  );
   bindRange(unifiedBody, noiseParams, "baseFreq", {
     label: "Main Noise Size",
     min: 0.05,
     max: 1.0,
-    step: 0.01,
-    precision: 2,
+    step: 0.001,
+    precision: 3,
   }, callbacks.onNoiseParamChange);
   const outputPairRow = document.createElement("div");
   outputPairRow.className = "control-row-pair";
@@ -1038,13 +1066,12 @@ export function createControlPanel(
   latticePairRow.appendChild(latticeWarpFreqRow);
   unifiedBody.appendChild(latticePairRow);
   bindRange(unifiedBody, noiseParams, "baseOffsetZ", {
-    label: "Offset",
+    label: "Z Offset",
     min: -8,
     max: 8,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
-
   const symmetryModeRow = document.createElement("div");
   symmetryModeRow.className = "control-row";
   const symmetryModeLabel = document.createElement("label");
@@ -1303,6 +1330,10 @@ export function createControlPanel(
       setUiDepth(value);
     },
   );
+  bindCheckbox(uiBody, soloNoisePlaneToggleState, "enabled", "Solo Noise Plane", (_key, value): void => {
+    soloNoisePlaneToggleState.enabled = value;
+    callbacks.onSoloNoisePlaneToggle(value >= 0.5);
+  });
   bindRange(uiBody, uiBevelStrengthState, "value", {
     label: "Bevel Shape",
     min: 0.6,
@@ -1477,13 +1508,6 @@ export function createControlPanel(
     label: "Matcap Brightness",
     min: 0,
     max: 3,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(matcapMaterialBody, materialParams, "matcapBlur", {
-    label: "Matcap Blur",
-    min: 0,
-    max: 4,
     step: 0.01,
     precision: 2,
   }, callbacks.onMaterialParamChange);

@@ -403,6 +403,10 @@ controlPanel = createControlPanel(
       shadingParams[key] = value;
       scene.setShadingParam(key, value);
     },
+
+    onSoloNoisePlaneToggle: (enabled): void => {
+      scene.setSoloNoisePlane(enabled);
+    },
   },
 );
 

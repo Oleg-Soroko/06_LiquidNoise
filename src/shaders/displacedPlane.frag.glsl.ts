@@ -30,10 +30,8 @@ uniform float uUseClearcoatMap;
 uniform float uUseNormalMap;
 uniform float uUseMatcapMap;
 uniform float uMatcapBrightness;
-uniform float uMatcapBlur;
 uniform float uMatcapContrast;
 uniform float uMatcapSaturation;
-uniform vec2 uMatcapTexelSize;
 uniform vec3 uKeyDir;
 uniform vec3 uFillDir;
 uniform float uKeyStrength;
@@ -100,23 +98,8 @@ vec3 applySaturation(vec3 color, float saturation) {
   return mix(vec3(luma), color, max(0.0, saturation));
 }
 
-vec3 sampleMatcapWithBlur(vec2 uv, float blurAmount) {
-  vec2 blurUv = uMatcapTexelSize * max(0.0, blurAmount) * 6.0;
-  if (blurUv.x <= 0.000001 && blurUv.y <= 0.000001) {
-    return texture2D(uMatcapMap, uv).rgb;
-  }
-
-  vec3 sum = vec3(0.0);
-  sum += texture2D(uMatcapMap, clamp(uv, 0.0, 1.0)).rgb * 0.20;
-  sum += texture2D(uMatcapMap, clamp(uv + vec2(blurUv.x, 0.0), 0.0, 1.0)).rgb * 0.15;
-  sum += texture2D(uMatcapMap, clamp(uv - vec2(blurUv.x, 0.0), 0.0, 1.0)).rgb * 0.15;
-  sum += texture2D(uMatcapMap, clamp(uv + vec2(0.0, blurUv.y), 0.0, 1.0)).rgb * 0.15;
-  sum += texture2D(uMatcapMap, clamp(uv - vec2(0.0, blurUv.y), 0.0, 1.0)).rgb * 0.15;
-  sum += texture2D(uMatcapMap, clamp(uv + blurUv, 0.0, 1.0)).rgb * 0.05;
-  sum += texture2D(uMatcapMap, clamp(uv - blurUv, 0.0, 1.0)).rgb * 0.05;
-  sum += texture2D(uMatcapMap, clamp(uv + vec2(blurUv.x, -blurUv.y), 0.0, 1.0)).rgb * 0.05;
-  sum += texture2D(uMatcapMap, clamp(uv + vec2(-blurUv.x, blurUv.y), 0.0, 1.0)).rgb * 0.05;
-  return sum;
+vec3 sampleMatcap(vec2 uv) {
+  return texture2D(uMatcapMap, uv).rgb;
 }
 
 vec3 evaluatePBRLight(
@@ -194,7 +177,7 @@ vec3 shadeSurface(vec3 normal, vec3 viewDir, vec2 uv) {
   if (uMaterialMode > 0.5) {
     vec3 viewNormal = normalize((viewMatrix * vec4(n, 0.0)).xyz);
     vec2 matcapUv = clamp(viewNormal.xy * 0.5 + 0.5, 0.0, 1.0);
-    vec3 matcapColor = sampleMatcapWithBlur(matcapUv, uMatcapBlur);
+    vec3 matcapColor = sampleMatcap(matcapUv);
     matcapColor = (matcapColor - vec3(0.5)) * max(0.0, uMatcapContrast) + vec3(0.5);
     matcapColor = applySaturation(matcapColor, uMatcapSaturation);
     matcapColor *= max(0.0, uMatcapBrightness);

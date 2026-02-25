@@ -4,6 +4,7 @@ varying vec3 vWorldPos;
 varying float vHeight;
 
 uniform float uTime;
+uniform float uNoiseCore;
 
 uniform float uBaseFreq;
 uniform vec3 uBaseOffset;
@@ -18,6 +19,8 @@ uniform float uTurboFreq;
 uniform float uTurboLacunarity;
 uniform float uTurboAmp;
 uniform float uRoughness;
+uniform float uRidgeAmount;
+uniform float uContrast;
 uniform float uAttenuation;
 uniform float uTurbulence;
 uniform float uOutputMin;
@@ -136,15 +139,107 @@ float snoise(vec3 v) {
   );
 }
 
+vec4 os2sPermute(vec4 t) {
+  return t * (t * 34.0 + 133.0);
+}
+
+vec3 os2sGrad(float hash) {
+  vec3 cube = mod(floor(hash / vec3(1.0, 2.0, 4.0)), 2.0) * 2.0 - 1.0;
+  vec3 cuboct = cube;
+  if (hash < 16.0) {
+    cuboct.x = 0.0;
+  } else if (hash < 32.0) {
+    cuboct.y = 0.0;
+  } else {
+    cuboct.z = 0.0;
+  }
+
+  float type = mod(floor(hash / 8.0), 2.0);
+  vec3 rhomb = (1.0 - type) * cube + type * (cuboct + cross(cube, cuboct));
+  vec3 g = cuboct * 1.22474487139 + rhomb;
+  g *= (1.0 - 0.042942436724648037 * type) * 3.5946317686139184;
+  return g;
+}
+
+float openSimplex2SPart(vec3 X) {
+  vec3 b = floor(X);
+  vec4 i4 = vec4(X - b, 2.5);
+
+  vec3 v1 = b + floor(dot(i4, vec4(0.25)));
+  vec3 v2 = b + vec3(1.0, 0.0, 0.0) + vec3(-1.0, 1.0, 1.0) * floor(dot(i4, vec4(-0.25, 0.25, 0.25, 0.35)));
+  vec3 v3 = b + vec3(0.0, 1.0, 0.0) + vec3(1.0, -1.0, 1.0) * floor(dot(i4, vec4(0.25, -0.25, 0.25, 0.35)));
+  vec3 v4 = b + vec3(0.0, 0.0, 1.0) + vec3(1.0, 1.0, -1.0) * floor(dot(i4, vec4(0.25, 0.25, -0.25, 0.35)));
+
+  vec4 hashes = os2sPermute(mod(vec4(v1.x, v2.x, v3.x, v4.x), 289.0));
+  hashes = os2sPermute(mod(hashes + vec4(v1.y, v2.y, v3.y, v4.y), 289.0));
+  hashes = mod(os2sPermute(mod(hashes + vec4(v1.z, v2.z, v3.z, v4.z), 289.0)), 48.0);
+
+  vec3 d1 = X - v1;
+  vec3 d2 = X - v2;
+  vec3 d3 = X - v3;
+  vec3 d4 = X - v4;
+  vec4 a = max(0.75 - vec4(dot(d1, d1), dot(d2, d2), dot(d3, d3), dot(d4, d4)), 0.0);
+  vec4 aa = a * a;
+  vec4 aaaa = aa * aa;
+
+  vec3 g1 = os2sGrad(hashes.x);
+  vec3 g2 = os2sGrad(hashes.y);
+  vec3 g3 = os2sGrad(hashes.z);
+  vec3 g4 = os2sGrad(hashes.w);
+  vec4 extrapolations = vec4(dot(d1, g1), dot(d2, g2), dot(d3, g3), dot(d4, g4));
+
+  return dot(aaaa, extrapolations);
+}
+
+float openSimplex2SNoise(vec3 X) {
+  mat3 orthonormalMap = mat3(
+    0.788675134594813, -0.211324865405187, -0.577350269189626,
+    -0.211324865405187, 0.788675134594813, -0.577350269189626,
+    0.577350269189626, 0.577350269189626, 0.577350269189626
+  );
+
+  vec3 xr = orthonormalMap * X;
+  return openSimplex2SPart(xr) + openSimplex2SPart(xr + 144.5);
+}
+
+float softLimitSigned(float x) {
+  return x / sqrt(1.0 + x * x);
+}
+
+float coreNoise(vec3 p) {
+  if (uNoiseCore < 0.5) {
+    return snoise(p);
+  }
+
+  float os2sFreqComp = 1.0;
+  float os2sAmpComp = 1.0;
+  if (uNoiseCore < 1.5) {
+    return softLimitSigned(openSimplex2SNoise(p * os2sFreqComp) * os2sAmpComp);
+  }
+
+  // OpenSimplexFixed v2: keep seam-safe OpenSimplex core but bias toward wider Simplex-like plateaus.
+  float os2sFixedFreqComp = 0.93;
+  float os2sFixedAmpComp = 1.30;
+  float os2sFixedGamma = 1.10;
+  float os2sFixedPlateauMix = 0.22;
+
+  float nMain = openSimplex2SNoise(p * os2sFixedFreqComp);
+  float nLow = openSimplex2SNoise(p * (os2sFixedFreqComp * 0.52));
+  float n = mix(nMain, nLow, os2sFixedPlateauMix);
+  n = softLimitSigned(n * os2sFixedAmpComp);
+  n = sign(n) * pow(abs(n), os2sFixedGamma);
+  return n;
+}
+
 float baseNoise(vec3 p) {
-  float n = snoise(p) * 0.5 + 0.5;
+  float n = coreNoise(p) * 0.5 + 0.5;
   return mix(n, 1.0 - n, clamp(uComplement, 0.0, 1.0));
 }
 
 vec3 warpVector(vec3 p) {
-  float wx = snoise(p + vec3(19.2, 3.7, 11.8));
-  float wy = snoise(p + vec3(-7.4, 13.1, 5.2));
-  float wz = snoise(p + vec3(9.3, -17.0, 6.1));
+  float wx = coreNoise(p + vec3(19.2, 3.7, 11.8));
+  float wy = coreNoise(p + vec3(-7.4, 13.1, 5.2));
+  float wz = coreNoise(p + vec3(9.3, -17.0, 6.1));
   return vec3(wx, wy, wz);
 }
 
@@ -163,7 +258,9 @@ float alligatorTurbulence(vec3 p) {
 
   for (int i = 0; i < 8; i++) {
     float enabled = step(float(i), uTurbulence - 0.5);
-    float n = abs(snoise(p * freq + vec3(float(i) * 7.13, float(i) * 3.11, float(i) * 5.23)));
+    float n = abs(coreNoise(p * freq + vec3(float(i) * 7.13, float(i) * 3.11, float(i) * 5.23)));
+    float ridge = 1.0 - n;
+    n = mix(n, ridge, clamp(uRidgeAmount, 0.0, 1.0));
     n = pow(clamp(n, 0.0, 1.0), roughPow);
     sum += n * octaveAmp * enabled;
     norm += octaveAmp * enabled;
@@ -242,6 +339,7 @@ void main() {
   float simplex01 = baseNoise(simplexWarped);
   vec3 alligatorPos = vec3(simplex01, simplex01, simplex01);
   float alligator01 = clamp(alligatorTurbulence(alligatorPos), 0.0, 1.0);
+  alligator01 = clamp((alligator01 - 0.5) * max(0.0, uContrast) + 0.5, 0.0, 1.0);
   float finalRemap = mix(uOutputMin, uOutputMax, alligator01);
 
   float macroAudio = 1.0 + (uLow * uLowGain + uMid * uMidGain) * uGlobalGain * uAudioMacroReactivity;
@@ -250,7 +348,7 @@ void main() {
     0.0,
     1.0
   );
-  float fine = snoise(
+  float fine = coreNoise(
     simplexWarped * max(0.0001, uDetailFreq) +
     vec3(0.0, 0.0, uTime * (uDriftSpeed * 1.9 + 0.03))
   );
