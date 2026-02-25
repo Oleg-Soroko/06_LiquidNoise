@@ -17,11 +17,6 @@ uniform float uMatRoughness;
 uniform float uMatMetalness;
 uniform float uMatClearcoat;
 uniform float uMatNormalStrength;
-uniform float uCurvatureAmount;
-uniform float uCurvatureScale;
-uniform float uCurvaturePower;
-uniform float uEdgeWearStrength;
-uniform float uCavityWearStrength;
 uniform sampler2D uAlbedoMap;
 uniform sampler2D uRoughnessMap;
 uniform sampler2D uMetalnessMap;
@@ -124,31 +119,6 @@ vec3 sampleMatcapWithBlur(vec2 uv, float blurAmount) {
   return sum;
 }
 
-vec3 applyCurvatureWear(vec3 color, vec3 normal) {
-  float amount = max(0.0, uCurvatureAmount);
-  if (amount <= 0.0001) {
-    return color;
-  }
-
-  vec3 dpdx = dFdx(vWorldPos);
-  vec3 dpdy = dFdy(vWorldPos);
-  vec3 dndx = dFdx(normal);
-  vec3 dndy = dFdy(normal);
-
-  float curvatureMagnitude = (length(dndx) + length(dndy)) * max(0.0, uCurvatureScale);
-  float curvatureSign = sign(dot(dndx, dpdx) + dot(dndy, dpdy));
-  float signedCurvature = curvatureMagnitude * curvatureSign;
-  float power = max(0.05, uCurvaturePower);
-
-  float edgeMask = pow(clamp(-signedCurvature, 0.0, 1.0), power);
-  float cavityMask = pow(clamp(signedCurvature, 0.0, 1.0), power);
-
-  vec3 result = color;
-  result += vec3(edgeMask * max(0.0, uEdgeWearStrength));
-  result *= 1.0 - cavityMask * max(0.0, uCavityWearStrength);
-  return mix(color, clamp(result, vec3(0.0), vec3(1.0)), amount);
-}
-
 vec3 evaluatePBRLight(
   vec3 n,
   vec3 v,
@@ -241,7 +211,7 @@ vec3 shadeSurface(vec3 normal, vec3 viewDir, vec2 uv) {
     shaded = clamp(ambient + keyLight + fillLight, vec3(0.0), vec3(1.0));
   }
 
-  return applyCurvatureWear(shaded, n);
+  return shaded;
 }
 
 void main() {

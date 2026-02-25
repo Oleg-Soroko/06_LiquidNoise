@@ -3,7 +3,6 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { SAOPass } from "three/examples/jsm/postprocessing/SAOPass.js";
 import type { AudioBands } from "../audio/BandAnalyzer";
 import { displacedPlaneFragmentShader } from "../shaders/displacedPlane.frag.glsl";
 import { displacedPlaneVertexShader } from "../shaders/displacedPlane.vert.glsl";
@@ -81,11 +80,6 @@ export interface MaterialParams {
   metalness: number;
   clearcoat: number;
   normalStrength: number;
-  curvatureAmount: number;
-  curvatureScale: number;
-  curvaturePower: number;
-  edgeWearStrength: number;
-  cavityWearStrength: number;
   matcapBrightness: number;
   matcapBlur: number;
   matcapContrast: number;
@@ -95,7 +89,7 @@ export interface MaterialParams {
 export type MaterialMode = "pbr" | "matcap";
 export type MaterialMapSlot = "albedo" | "roughness" | "metalness" | "clearcoat" | "normal" | "matcap";
 
-export type AmbientOcclusionMode = "none" | "gtao" | "sao";
+export type AmbientOcclusionMode = "none" | "gtao";
 
 export interface AmbientOcclusionParams {
   mode: AmbientOcclusionMode;
@@ -140,7 +134,7 @@ export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
   turbulence: 8.0,
   outputMin: -0.06,
   outputMax: 0.44,
-  driftSpeed: 0.174,
+  driftSpeed: 0.5,
   detailFreq: 3.35,
   detailStrength: 0.45,
   audioMacroReactivity: 1.0,
@@ -193,11 +187,6 @@ export const DEFAULT_MATERIAL_PARAMS: MaterialParams = {
   metalness: 1.0,
   clearcoat: 0.0,
   normalStrength: 0.0,
-  curvatureAmount: 0.0,
-  curvatureScale: 8.0,
-  curvaturePower: 1.2,
-  edgeWearStrength: 0.35,
-  cavityWearStrength: 0.25,
   matcapBrightness: 2.22,
   matcapBlur: 0.0,
   matcapContrast: 1.0,
@@ -207,23 +196,23 @@ export const DEFAULT_MATERIAL_PARAMS: MaterialParams = {
 export const DEFAULT_MATERIAL_MODE: MaterialMode = "matcap";
 
 export const DEFAULT_AMBIENT_OCCLUSION_PARAMS: AmbientOcclusionParams = {
-  mode: "none",
-  intensity: 0.75,
-  radius: 0.8,
-  thickness: 1.0,
-  falloff: 1.0,
-  denoiseRadius: 12,
+  mode: "gtao",
+  intensity: 1.86,
+  radius: 0.36,
+  thickness: 0.66,
+  falloff: 0.10,
+  denoiseRadius: 17,
 };
 
 export const DEFAULT_SHADING_PARAMS: ShadingParams = {
-  keyAzimuth: 90,
-  keyElevation: 46,
+  keyAzimuth: -22,
+  keyElevation: 68,
   keyStrength: 1.0,
-  fillAzimuth: -146,
-  fillElevation: 7,
-  fillStrength: 1.05,
-  hemiStrength: 0.05,
-  diffuseBase: 0.22,
+  fillAzimuth: 0,
+  fillElevation: 0,
+  fillStrength: 1.28,
+  hemiStrength: 0.22,
+  diffuseBase: 0.0,
   baseColorR: 0.90,
   baseColorG: 0.90,
   baseColorB: 0.91,
@@ -315,11 +304,6 @@ interface PlaneUniforms {
   uMatMetalness: THREE.IUniform<number>;
   uMatClearcoat: THREE.IUniform<number>;
   uMatNormalStrength: THREE.IUniform<number>;
-  uCurvatureAmount: THREE.IUniform<number>;
-  uCurvatureScale: THREE.IUniform<number>;
-  uCurvaturePower: THREE.IUniform<number>;
-  uEdgeWearStrength: THREE.IUniform<number>;
-  uCavityWearStrength: THREE.IUniform<number>;
   uAlbedoMap: THREE.IUniform<THREE.Texture>;
   uRoughnessMap: THREE.IUniform<THREE.Texture>;
   uMetalnessMap: THREE.IUniform<THREE.Texture>;
@@ -354,7 +338,6 @@ export class DisplacedPlaneScene {
   private readonly composer: EffectComposer;
   private readonly renderPass: RenderPass;
   private readonly gtaoPass: GTAOPass;
-  private readonly saoPass: SAOPass;
   private readonly aoDepthTarget: THREE.WebGLRenderTarget;
   private readonly aoDepthTexture: THREE.DepthTexture;
   private readonly material: THREE.ShaderMaterial;
@@ -628,10 +611,6 @@ export class DisplacedPlaneScene {
     this.gtaoPass.output = GTAOPass.OUTPUT.Default;
     this.composer.addPass(this.gtaoPass);
 
-    this.saoPass = new SAOPass(this.scene, this.camera);
-    this.saoPass.params.output = SAOPass.OUTPUT.Default;
-    this.composer.addPass(this.saoPass);
-
     this.aoDepthTexture = new THREE.DepthTexture(1, 1, THREE.UnsignedInt248Type);
     this.aoDepthTexture.format = THREE.DepthStencilFormat;
     this.aoDepthTexture.type = THREE.UnsignedInt248Type;
@@ -711,11 +690,6 @@ export class DisplacedPlaneScene {
       uMatMetalness: { value: this.materialParams.metalness },
       uMatClearcoat: { value: this.materialParams.clearcoat },
       uMatNormalStrength: { value: this.materialParams.normalStrength },
-      uCurvatureAmount: { value: this.materialParams.curvatureAmount },
-      uCurvatureScale: { value: this.materialParams.curvatureScale },
-      uCurvaturePower: { value: this.materialParams.curvaturePower },
-      uEdgeWearStrength: { value: this.materialParams.edgeWearStrength },
-      uCavityWearStrength: { value: this.materialParams.cavityWearStrength },
       uAlbedoMap: { value: this.defaultAlbedoTexture },
       uRoughnessMap: { value: this.defaultScalarTexture },
       uMetalnessMap: { value: this.defaultScalarTexture },
@@ -1094,11 +1068,6 @@ export class DisplacedPlaneScene {
     this.uniforms.uMatMetalness.value = this.materialParams.metalness;
     this.uniforms.uMatClearcoat.value = this.materialParams.clearcoat;
     this.uniforms.uMatNormalStrength.value = this.materialParams.normalStrength;
-    this.uniforms.uCurvatureAmount.value = this.materialParams.curvatureAmount;
-    this.uniforms.uCurvatureScale.value = this.materialParams.curvatureScale;
-    this.uniforms.uCurvaturePower.value = this.materialParams.curvaturePower;
-    this.uniforms.uEdgeWearStrength.value = this.materialParams.edgeWearStrength;
-    this.uniforms.uCavityWearStrength.value = this.materialParams.cavityWearStrength;
     this.uniforms.uMatcapBrightness.value = this.materialParams.matcapBrightness;
     this.uniforms.uMatcapBlur.value = this.materialParams.matcapBlur;
     this.uniforms.uMatcapContrast.value = this.materialParams.matcapContrast;
@@ -1218,10 +1187,13 @@ export class DisplacedPlaneScene {
   private applyAmbientOcclusionParams(): void {
     const mode = this.ambientOcclusionParams.mode;
     this.gtaoPass.enabled = mode === "gtao";
-    this.saoPass.enabled = mode === "sao";
 
     if (mode === "gtao") {
-      const denoiseRadius = Math.max(2, this.ambientOcclusionParams.denoiseRadius * 1.35);
+      const denoiseStrength = THREE.MathUtils.clamp(this.ambientOcclusionParams.denoiseRadius / 24, 0, 1);
+      const denoiseRadius = THREE.MathUtils.lerp(2, 32, denoiseStrength);
+      const lumaPhi = THREE.MathUtils.lerp(0.08, 18, denoiseStrength);
+      const depthPhi = THREE.MathUtils.lerp(0.02, 4, denoiseStrength);
+      const normalPhi = THREE.MathUtils.lerp(14, 8, denoiseStrength);
       this.gtaoPass.blendIntensity = this.ambientOcclusionParams.intensity;
       this.gtaoPass.updateGtaoMaterial({
         radius: this.ambientOcclusionParams.radius,
@@ -1231,21 +1203,13 @@ export class DisplacedPlaneScene {
       });
       this.gtaoPass.updatePdMaterial({
         radius: denoiseRadius,
-        lumaPhi: 18,
-        depthPhi: 4,
-        normalPhi: 8,
+        lumaPhi,
+        depthPhi,
+        normalPhi,
         rings: 4,
         samples: 32,
         radiusExponent: 1.6,
       });
-    }
-
-    if (mode === "sao") {
-      this.saoPass.params.saoIntensity = this.ambientOcclusionParams.intensity;
-      this.saoPass.params.saoKernelRadius = Math.max(1, this.ambientOcclusionParams.radius * 100);
-      this.saoPass.params.saoScale = this.ambientOcclusionParams.falloff;
-      this.saoPass.params.saoBias = Math.max(0, 1 - this.ambientOcclusionParams.thickness * 0.5);
-      this.saoPass.params.saoBlurRadius = Math.max(1, Math.round(this.ambientOcclusionParams.denoiseRadius));
     }
   }
 
@@ -1427,7 +1391,6 @@ export class DisplacedPlaneScene {
     this.material.dispose();
     this.renderPass.dispose();
     this.gtaoPass.dispose();
-    this.saoPass.dispose();
     this.aoDepthTarget.dispose();
     this.aoDepthTexture.dispose();
     this.composer.dispose();

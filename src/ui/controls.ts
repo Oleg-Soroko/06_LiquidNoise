@@ -25,9 +25,12 @@ export interface ControlPanelState {
 }
 
 export interface ControlCallbacks {
+  onDefaultSelected(): Promise<void> | void;
   onFileSelected(file: File): Promise<void> | void;
   onMicToggle(): Promise<void> | void;
+  onRecordToggle(): Promise<void> | void;
   onPlayToggle(): Promise<void> | void;
+  onFpsLimitModeChange(mode: "30" | "60" | "unlimited"): void;
   onNoiseParamChange(key: keyof HoudiniNoiseParams, value: number): void;
   onAudioMapParamChange(key: keyof AudioMapParams, value: number): void;
   onInteractionParamChange(key: keyof InteractionParams, value: number): void;
@@ -44,7 +47,10 @@ export interface ControlCallbacks {
 export interface ControlPanelApi {
   setStatus(text: string, kind?: "info" | "error"): void;
   setEnergy(level: number): void;
+  setFps(fps: number): void;
   setMicActive(active: boolean): void;
+  setRecordState(recording: boolean): void;
+  setRecordEnabled(enabled: boolean): void;
   setPlayState(playing: boolean): void;
   setPlayEnabled(enabled: boolean): void;
   dispose(): void;
@@ -93,35 +99,56 @@ export function createControlPanel(
   callbacks: ControlCallbacks,
 ): ControlPanelApi {
   root.innerHTML = `
-    <section class="panel">
-      <div class="panel-head">
-        <h1 class="title">AFTER FORM NOISE</h1>
-        <div class="action-row">
-          <label class="file-button">
-            <input id="audio-file-input" type="file" accept="audio/*" />
-            <span>Load Audio</span>
-          </label>
-          <button id="mic-toggle-btn" type="button">Use Microphone</button>
-          <button id="play-toggle-btn" type="button" disabled>Play</button>
+    <div class="panel-dock" data-ui-hidden="false">
+      <section class="panel">
+        <div class="panel-head">
+          <h1 class="title">AFTER FORM NOISE</h1>
+          <div class="project-description" aria-label="Project description">
+            <p class="project-description-line">Audio-reactive procedural displacement playground.</p>
+            <p class="project-description-line">Real-time control for noise, shading, and camera behavior.</p>
+            <p class="project-description-line">Use Default loop, load your own track, or drive with Mic.</p>
+          </div>
+          <div class="action-row">
+            <button id="default-audio-btn" type="button">Default</button>
+            <label class="file-button">
+              <input id="audio-file-input" type="file" accept="audio/*" />
+              <span>Load</span>
+            </label>
+            <button id="mic-toggle-btn" type="button">Mic</button>
+            <button id="record-toggle-btn" type="button">Record</button>
+          </div>
+          <div class="meter-row">
+            <button id="play-toggle-btn" type="button" disabled>Play</button>
+            <div class="meter">
+              <div id="energy-fill" class="meter-fill"></div>
+            </div>
+          </div>
+          <p id="status-line" class="status">Idle. Choose Default/Load or enable microphone.</p>
+          <div id="tabs-nav-slot" class="tabs-nav-slot"></div>
         </div>
-        <div class="meter">
-          <div id="energy-fill" class="meter-fill"></div>
-        </div>
-        <p id="status-line" class="status">Idle. Load a file or enable your microphone.</p>
-        <div id="tabs-nav-slot" class="tabs-nav-slot"></div>
-      </div>
-      <div id="folders-root" class="folders-root"></div>
-    </section>
-    <div class="hint">Orbit: left drag | Pan: right drag | Zoom: wheel</div>
+        <div id="folders-root" class="folders-root"></div>
+      </section>
+      <button id="ui-visibility-btn" class="ui-visibility-btn" type="button" aria-label="Hide UI">&lt;</button>
+    </div>
+    <div class="hint-row">
+      <div id="fps-readout" class="fps-readout">FPS: --</div>
+      <div class="hint">Orbit: left drag | Pan: right drag | Zoom: wheel</div>
+    </div>
   `;
 
+  const panelDockElement = requireElement<HTMLDivElement>(root, ".panel-dock");
+  const uiVisibilityButton = requireElement<HTMLButtonElement>(root, "#ui-visibility-btn");
+  const defaultButton = requireElement<HTMLButtonElement>(root, "#default-audio-btn");
   const fileInput = requireElement<HTMLInputElement>(root, "#audio-file-input");
   const micButton = requireElement<HTMLButtonElement>(root, "#mic-toggle-btn");
+  const recordButton = requireElement<HTMLButtonElement>(root, "#record-toggle-btn");
   const playButton = requireElement<HTMLButtonElement>(root, "#play-toggle-btn");
   const energyFill = requireElement<HTMLDivElement>(root, "#energy-fill");
   const statusLine = requireElement<HTMLParagraphElement>(root, "#status-line");
   const tabsNavSlot = requireElement<HTMLDivElement>(root, "#tabs-nav-slot");
   const foldersRoot = requireElement<HTMLDivElement>(root, "#folders-root");
+  const hintRowElement = requireElement<HTMLDivElement>(root, ".hint-row");
+  const fpsReadoutElement = requireElement<HTMLDivElement>(root, "#fps-readout");
   const panelElement = requireElement<HTMLElement>(root, ".panel");
   const panelHeadElement = requireElement<HTMLElement>(root, ".panel-head");
   const panelScrollbar = document.createElement("div");
@@ -161,22 +188,38 @@ export function createControlPanel(
     root.dataset.uiDepth = mode;
   };
 
+  let defaultBusy = false;
   let micBusy = false;
+  let recordBusy = false;
+  let recordEnabled = true;
   let playBusy = false;
   let playEnabled = false;
+  let uiHidden = false;
+  const visibleUiHandleText = "<\n<\n<\n<";
+  const hiddenUiHandleText = ">\n>\n>\n>";
+
+  const applyUiVisibility = (): void => {
+    root.dataset.uiHidden = uiHidden ? "true" : "false";
+    panelDockElement.dataset.uiHidden = uiHidden ? "true" : "false";
+    uiVisibilityButton.textContent = uiHidden ? hiddenUiHandleText : visibleUiHandleText;
+    uiVisibilityButton.setAttribute("aria-label", uiHidden ? "Show UI" : "Hide UI");
+    scheduleScrollbarTrackAnchorsUpdate();
+    scheduleHintPositionUpdate();
+  };
 
   const refreshButtonState = (): void => {
+    defaultButton.disabled = defaultBusy;
     micButton.disabled = micBusy;
+    recordButton.disabled = recordBusy || !recordEnabled;
     playButton.disabled = playBusy || !playEnabled;
   };
 
-  const bindRange = <T extends object, K extends keyof T>(
-    body: HTMLElement,
+  const createRangeRow = <T extends object, K extends keyof T>(
     state: T,
     key: K,
     spec: RangeSpec,
     onValue: (key: K, value: number) => void,
-  ): void => {
+  ): HTMLDivElement => {
     const row = document.createElement("div");
     row.className = "control-row";
 
@@ -237,6 +280,17 @@ export function createControlPanel(
     row.appendChild(label);
     row.appendChild(output);
     row.appendChild(input);
+    return row;
+  };
+
+  const bindRange = <T extends object, K extends keyof T>(
+    body: HTMLElement,
+    state: T,
+    key: K,
+    spec: RangeSpec,
+    onValue: (key: K, value: number) => void,
+  ): void => {
+    const row = createRangeRow(state, key, spec, onValue);
     body.appendChild(row);
   };
 
@@ -246,9 +300,13 @@ export function createControlPanel(
     key: K,
     labelText: string,
     onValue: (key: K, value: number) => void,
+    options?: { hidden?: boolean },
   ): void => {
     const row = document.createElement("label");
     row.className = "checkbox-row";
+    if (options?.hidden) {
+      row.hidden = true;
+    }
 
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -507,6 +565,10 @@ export function createControlPanel(
   const documentStyle = document.documentElement.style;
   const rootComputedStyle = getComputedStyle(document.documentElement);
   const initialTextColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--text"), "#c5cfdf");
+  const initialFolderTitleColor = normalizeHexColor(
+    rootComputedStyle.getPropertyValue("--folder-title-color"),
+    "#c3cedf",
+  );
   const initialMainUiColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--ui-main-color"), "#253041");
   const initialPanelHeadColor = normalizeHexColor(
     rootComputedStyle.getPropertyValue("--panel-head-color"),
@@ -520,6 +582,7 @@ export function createControlPanel(
   const parsedMenuSectionGap = Number.parseFloat(rootComputedStyle.getPropertyValue("--menu-section-gap"));
   const parsedMenuPaddingTop = Number.parseFloat(rootComputedStyle.getPropertyValue("--panel-content-pad-top"));
   const parsedMenuPaddingBottom = Number.parseFloat(rootComputedStyle.getPropertyValue("--panel-content-pad-bottom"));
+  const parsedHeadFolderLightness = Number.parseFloat(rootComputedStyle.getPropertyValue("--head-folder-lightness"));
   const uiScaleState = {
     value: Number.isFinite(parsedUiScale) && parsedUiScale > 0 ? parsedUiScale : 1,
   };
@@ -535,12 +598,17 @@ export function createControlPanel(
   const menuPaddingBottomState = {
     value: Number.isFinite(parsedMenuPaddingBottom) ? parsedMenuPaddingBottom : 1,
   };
+  const headFolderLightnessState = {
+    value: Number.isFinite(parsedHeadFolderLightness) && parsedHeadFolderLightness > 0 ? parsedHeadFolderLightness : 1,
+  };
   const uiTextColor = fromHexColor(initialTextColor);
+  const uiFolderTitleColor = fromHexColor(initialFolderTitleColor);
   const uiMainColor = fromHexColor(initialMainUiColor);
   const panelHeadColor = fromHexColor(initialPanelHeadColor);
   const uiAccentColor = fromHexColor(initialUiColor);
   const uiSliderColor = fromHexColor(initialSliderColor);
   const uiScrollbarColor = fromHexColor(initialScrollbarColor);
+  const panelHeadShadow = { r: 11 / 255, g: 17 / 255, b: 26 / 255 };
 
   const clamp = (value: number, min: number, max: number): number => {
     return Math.max(min, Math.min(max, value));
@@ -570,6 +638,7 @@ export function createControlPanel(
 
   let scrollbarAnchorRafId = 0;
   let scrollbarSyncRafId = 0;
+  let hintPositionRafId = 0;
   let scrollbarDragPointerId: number | null = null;
   let scrollbarDragStartClientY = 0;
   let scrollbarDragStartScrollTop = 0;
@@ -635,6 +704,32 @@ export function createControlPanel(
 
     panelScrollbarThumb.style.height = `${thumbSize.toFixed(1)}px`;
     panelScrollbarThumb.style.transform = `translateY(${thumbOffset.toFixed(1)}px)`;
+  };
+
+  const updateHintPosition = (): void => {
+    if (!root.isConnected || !panelElement.isConnected || !hintRowElement.isConnected) {
+      return;
+    }
+
+    const rootRect = root.getBoundingClientRect();
+    if (rootRect.width <= 0) {
+      return;
+    }
+
+    const panelRect = panelElement.getBoundingClientRect();
+    const panelRight = Math.max(0, Math.min(rootRect.width, panelRect.right - rootRect.left));
+    const hintCenterX = panelRight + (rootRect.width - panelRight) * 0.5;
+    root.style.setProperty("--hint-center-x", `${hintCenterX.toFixed(1)}px`);
+  };
+
+  const scheduleHintPositionUpdate = (): void => {
+    if (hintPositionRafId !== 0) {
+      window.cancelAnimationFrame(hintPositionRafId);
+    }
+    hintPositionRafId = window.requestAnimationFrame(() => {
+      hintPositionRafId = 0;
+      updateHintPosition();
+    });
   };
 
   const stopScrollbarThumbDrag = (pointerId?: number): void => {
@@ -775,6 +870,7 @@ export function createControlPanel(
     scrollbarAnchorRafId = window.requestAnimationFrame(() => {
       scrollbarAnchorRafId = 0;
       updateScrollbarTrackAnchors();
+      updateHintPosition();
     });
   };
 
@@ -787,11 +883,27 @@ export function createControlPanel(
     documentStyle.setProperty("--muted", `rgba(${r}, ${g}, ${b}, 0.72)`);
   };
 
+  const applyFolderTitleColor = (color: { r: number; g: number; b: number }): void => {
+    const hex = toHexColor(color.r, color.g, color.b);
+    documentStyle.setProperty("--folder-title-color", hex);
+  };
+
+  const derivePanelHeadColorFromMain = (color: { r: number; g: number; b: number }): { r: number; g: number; b: number } => {
+    const mainMix = 0.74;
+    const shadowMix = 1 - mainMix;
+    return {
+      r: color.r * mainMix + panelHeadShadow.r * shadowMix,
+      g: color.g * mainMix + panelHeadShadow.g * shadowMix,
+      b: color.b * mainMix + panelHeadShadow.b * shadowMix,
+    };
+  };
+
   const applyUiMainColor = (color: { r: number; g: number; b: number }): void => {
     uiMainColor.r = color.r;
     uiMainColor.g = color.g;
     uiMainColor.b = color.b;
     documentStyle.setProperty("--ui-main-color", toHexColor(color.r, color.g, color.b));
+    applyPanelHeadColor(derivePanelHeadColorFromMain(color));
   };
 
   const applyPanelHeadColor = (color: { r: number; g: number; b: number }): void => {
@@ -799,6 +911,11 @@ export function createControlPanel(
     panelHeadColor.g = color.g;
     panelHeadColor.b = color.b;
     documentStyle.setProperty("--panel-head-color", toHexColor(color.r, color.g, color.b));
+  };
+
+  const applyHeadFolderLightness = (value: number): void => {
+    const clamped = clamp(value, 0.7, 1.35);
+    documentStyle.setProperty("--head-folder-lightness", clamped.toFixed(2));
   };
 
   const applyUiColor = (color: { r: number; g: number; b: number }): void => {
@@ -854,8 +971,8 @@ export function createControlPanel(
   };
 
   applyUiTextColor(uiTextColor);
+  applyFolderTitleColor(uiFolderTitleColor);
   applyUiMainColor(uiMainColor);
-  applyPanelHeadColor(panelHeadColor);
   applyUiColor(uiAccentColor);
   applyUiBevelStrength(uiBevelStrengthState.value);
   applyUiScale(uiScaleState.value);
@@ -864,38 +981,36 @@ export function createControlPanel(
   applyMenuSectionGap(menuSectionGapState.value);
   applyMenuPaddingTop(menuPaddingTopState.value);
   applyMenuPaddingBottom(menuPaddingBottomState.value);
+  applyHeadFolderLightness(headFolderLightnessState.value);
 
-  const unifiedFolder = createFolder("Unified Noise", true);
+  const unifiedFolder = createFolder("MAIN NOISE", true);
   const unifiedBody = requireElement<HTMLDivElement>(unifiedFolder, ".folder-body");
   bindRange(unifiedBody, noiseParams, "baseFreq", {
-    label: "Base Frequency",
+    label: "Main Noise Size",
     min: 0.05,
     max: 1.0,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "baseOffsetZ", {
-    label: "Offset Z",
-    min: -8,
-    max: 8,
+  const outputPairRow = document.createElement("div");
+  outputPairRow.className = "control-row-pair";
+  const outputMinRow = createRangeRow(noiseParams, "outputMin", {
+    label: "Output Min",
+    min: -2.0,
+    max: 2.0,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "latticeWarp", {
-    label: "Lattice Warp",
-    min: 0,
-    max: 1,
+  const outputMaxRow = createRangeRow(noiseParams, "outputMax", {
+    label: "Output Max",
+    min: -2.0,
+    max: 2.0,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "latticeWarpFreq", {
-    label: "Warp Frequency",
-    min: 0.05,
-    max: 1.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindCheckbox(unifiedBody, noiseParams, "complement", "Complement", callbacks.onNoiseParamChange);
+  outputPairRow.appendChild(outputMinRow);
+  outputPairRow.appendChild(outputMaxRow);
+  unifiedBody.appendChild(outputPairRow);
   bindRange(unifiedBody, noiseParams, "finalAmp", {
     label: "Final Amplitude",
     min: 0,
@@ -903,75 +1018,33 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "outputMin", {
-    label: "Output Min",
-    min: -2.0,
-    max: 2.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "outputMax", {
-    label: "Output Max",
-    min: -2.0,
-    max: 2.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, noiseParams, "driftSpeed", {
-    label: "Drift Speed",
-    min: 0,
-    max: 0.65,
-    step: 0.001,
-    precision: 3,
-  }, callbacks.onNoiseParamChange);
-  bindRange(unifiedBody, qualityParams, "subdivisions", {
-    label: "Subdivisions",
-    min: 512,
-    max: 1600,
-    step: 1,
-    precision: 0,
-    changeOnly: true,
-  }, callbacks.onQualityParamChange);
-  const turboFolder = createFolder("AFTER FORM NOISE", true);
-  const turboBody = requireElement<HTMLDivElement>(turboFolder, ".folder-body");
-  bindRange(turboBody, noiseParams, "turboFreq", {
-    label: "Frequency",
-    min: 0.05,
-    max: 1.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(turboBody, noiseParams, "turboAmp", {
-    label: "Amplitude",
-    min: 0,
-    max: 3.5,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(turboBody, noiseParams, "roughness", {
-    label: "Roughness",
+  const latticePairRow = document.createElement("div");
+  latticePairRow.className = "control-row-pair";
+  const latticeWarpRow = createRangeRow(noiseParams, "latticeWarp", {
+    label: "Lattice Warp",
     min: 0,
     max: 1,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
-  bindRange(turboBody, noiseParams, "attenuation", {
-    label: "Attenuation",
+  const latticeWarpFreqRow = createRangeRow(noiseParams, "latticeWarpFreq", {
+    label: "Warp Frequency",
     min: 0.05,
-    max: 0.7,
+    max: 1.0,
     step: 0.01,
     precision: 2,
   }, callbacks.onNoiseParamChange);
-  bindRange(turboBody, noiseParams, "turbulence", {
-    label: "Turbulence",
-    min: 1,
+  latticePairRow.appendChild(latticeWarpRow);
+  latticePairRow.appendChild(latticeWarpFreqRow);
+  unifiedBody.appendChild(latticePairRow);
+  bindRange(unifiedBody, noiseParams, "baseOffsetZ", {
+    label: "Offset",
+    min: -8,
     max: 8,
-    step: 1,
-    precision: 0,
+    step: 0.01,
+    precision: 2,
   }, callbacks.onNoiseParamChange);
 
-  const advancedNoiseFolder = createFolder("Advanced Noise", false);
-  const advancedNoiseBody = requireElement<HTMLDivElement>(advancedNoiseFolder, ".folder-body");
   const symmetryModeRow = document.createElement("div");
   symmetryModeRow.className = "control-row";
   const symmetryModeLabel = document.createElement("label");
@@ -1000,80 +1073,60 @@ export function createControlPanel(
   cleanup.push(() => symmetryModeSelect.removeEventListener("change", onSymmetryModeChange));
   symmetryModeRow.appendChild(symmetryModeLabel);
   symmetryModeRow.appendChild(symmetryModeSelect);
-  advancedNoiseBody.appendChild(symmetryModeRow);
-  bindRange(advancedNoiseBody, noiseParams, "symmetryWidth", {
+  const symmetryPairRow = document.createElement("div");
+  symmetryPairRow.className = "control-row-pair";
+  const symmetryWidthRow = createRangeRow(noiseParams, "symmetryWidth", {
     label: "Symmetry Width",
     min: 0.001,
     max: 1.0,
     step: 0.001,
     precision: 3,
   }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "symmetryStretch", {
-    label: "Symmetry Stretch",
+  symmetryPairRow.appendChild(symmetryModeRow);
+  symmetryPairRow.appendChild(symmetryWidthRow);
+  unifiedBody.appendChild(symmetryPairRow);
+  bindRange(unifiedBody, noiseParams, "driftSpeed", {
+    label: "Drift Speed",
     min: 0,
-    max: 3.0,
-    step: 0.01,
-    precision: 2,
+    max: 0.65,
+    step: 0.001,
+    precision: 3,
   }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "domainScaleX", {
-    label: "Domain Scale X",
-    min: 0.1,
-    max: 4.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "domainScaleY", {
-    label: "Domain Scale Y",
-    min: 0.1,
-    max: 4.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "domainRotationDeg", {
-    label: "Domain Rotate",
-    min: -180,
-    max: 180,
+  bindRange(unifiedBody, qualityParams, "subdivisions", {
+    label: "Subdivisions",
+    min: 512,
+    max: 1600,
     step: 1,
     precision: 0,
-    suffix: "deg",
-  }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "turboLacunarity", {
-    label: "Turbo Lacunarity",
-    min: 1.01,
-    max: 3.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "detailFreq", {
-    label: "Detail Frequency",
-    min: 0.5,
-    max: 8.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "detailStrength", {
-    label: "Detail Strength",
-    min: 0,
-    max: 2.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "audioMacroReactivity", {
-    label: "Macro Reactivity",
-    min: 0,
-    max: 4.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
-  bindRange(advancedNoiseBody, noiseParams, "audioDetailReactivity", {
-    label: "Detail Reactivity",
-    min: 0,
-    max: 4.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
+    changeOnly: true,
+  }, callbacks.onQualityParamChange);
 
-  const audioFolder = createFolder("Audio Mapping", true);
+  const turboFolder = createFolder("DISTORTION NOISE", true);
+  const turboBody = requireElement<HTMLDivElement>(turboFolder, ".folder-body");
+  bindRange(turboBody, noiseParams, "turboFreq", {
+    label: "Distortion Noise Size",
+    min: 0.05,
+    max: 1.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(turboBody, noiseParams, "roughness", {
+    label: "Roughness",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(turboBody, noiseParams, "attenuation", {
+    label: "Attenuation",
+    min: 0.05,
+    max: 0.7,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindCheckbox(turboBody, noiseParams, "complement", "Complement", callbacks.onNoiseParamChange);
+
+  const audioFolder = createFolder("AUDIO MAPPING", true);
   const audioBody = requireElement<HTMLDivElement>(audioFolder, ".folder-body");
   bindRange(audioBody, audioMapParams, "lowGain", {
     label: "Low Gain",
@@ -1118,7 +1171,7 @@ export function createControlPanel(
     precision: 2,
   }, callbacks.onAudioMapParamChange);
 
-  const interactionFolder = createFolder("Interaction", true);
+  const interactionFolder = createFolder("INTERACTION", true);
   const interactionBody = requireElement<HTMLDivElement>(interactionFolder, ".folder-body");
   bindRange(interactionBody, interactionParams, "mouseRadius", {
     label: "Mouse Radius",
@@ -1170,7 +1223,7 @@ export function createControlPanel(
     precision: 2,
   }, callbacks.onInteractionParamChange);
 
-  const cameraFolder = createFolder("Camera", true);
+  const cameraFolder = createFolder("CAMERA", true);
   const cameraBody = requireElement<HTMLDivElement>(cameraFolder, ".folder-body");
   bindRange(cameraBody, cameraParams, "fov", {
     label: "FOV",
@@ -1235,7 +1288,7 @@ export function createControlPanel(
     suffix: "s",
   }, callbacks.onCameraParamChange);
 
-  const uiFolder = createFolder("UI Config", true);
+  const uiFolder = createFolder("UI CONFIG", true);
   const uiBody = requireElement<HTMLDivElement>(uiFolder, ".folder-body");
   bindSelect<UiDepthMode>(
     uiBody,
@@ -1266,6 +1319,12 @@ export function createControlPanel(
     uiTextColor.b = next.b;
     applyUiTextColor(uiTextColor);
   });
+  bindColor(uiBody, "Folder Name Color", uiFolderTitleColor, (next): void => {
+    uiFolderTitleColor.r = next.r;
+    uiFolderTitleColor.g = next.g;
+    uiFolderTitleColor.b = next.b;
+    applyFolderTitleColor(uiFolderTitleColor);
+  });
   bindColor(uiBody, "Main UI Color", uiMainColor, (next): void => {
     uiMainColor.r = next.r;
     uiMainColor.g = next.g;
@@ -1277,6 +1336,16 @@ export function createControlPanel(
     panelHeadColor.g = next.g;
     panelHeadColor.b = next.b;
     applyPanelHeadColor(panelHeadColor);
+  });
+  bindRange(uiBody, headFolderLightnessState, "value", {
+    label: "Head/Folder Lightness",
+    min: 0.7,
+    max: 1.35,
+    step: 0.01,
+    precision: 2,
+  }, (_key, value): void => {
+    headFolderLightnessState.value = value;
+    applyHeadFolderLightness(value);
   });
   bindColor(uiBody, "Accent Color", uiAccentColor, (next): void => {
     uiAccentColor.r = next.r;
@@ -1337,7 +1406,7 @@ export function createControlPanel(
     applyMenuPaddingBottom(value);
   });
 
-  const materialFolder = createFolder("Material", true);
+  const materialFolder = createFolder("MATERIAL", true);
   const materialBody = requireElement<HTMLDivElement>(materialFolder, ".folder-body");
   const pbrMaterialBody = document.createElement("div");
   pbrMaterialBody.className = "mode-group";
@@ -1403,41 +1472,6 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onMaterialParamChange);
-  bindRange(pbrMaterialBody, materialParams, "curvatureAmount", {
-    label: "Curvature Amount",
-    min: 0,
-    max: 1.5,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(pbrMaterialBody, materialParams, "curvatureScale", {
-    label: "Curvature Scale",
-    min: 0,
-    max: 16,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(pbrMaterialBody, materialParams, "curvaturePower", {
-    label: "Curvature Power",
-    min: 0.1,
-    max: 4,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(pbrMaterialBody, materialParams, "edgeWearStrength", {
-    label: "Edge Wear",
-    min: 0,
-    max: 2,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(pbrMaterialBody, materialParams, "cavityWearStrength", {
-    label: "Cavity Wear",
-    min: 0,
-    max: 2,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
 
   bindRange(matcapMaterialBody, materialParams, "matcapBrightness", {
     label: "Matcap Brightness",
@@ -1467,41 +1501,6 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onMaterialParamChange);
-  bindRange(matcapMaterialBody, materialParams, "curvatureAmount", {
-    label: "Curvature Amount",
-    min: 0,
-    max: 1.5,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(matcapMaterialBody, materialParams, "curvatureScale", {
-    label: "Curvature Scale",
-    min: 0,
-    max: 16,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(matcapMaterialBody, materialParams, "curvaturePower", {
-    label: "Curvature Power",
-    min: 0.1,
-    max: 4,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(matcapMaterialBody, materialParams, "edgeWearStrength", {
-    label: "Edge Wear",
-    min: 0,
-    max: 2,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
-  bindRange(matcapMaterialBody, materialParams, "cavityWearStrength", {
-    label: "Cavity Wear",
-    min: 0,
-    max: 2,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onMaterialParamChange);
   bindTextureInput(matcapMaterialBody, "Matcap Map", "matcap");
 
   materialBody.appendChild(pbrMaterialBody);
@@ -1510,20 +1509,29 @@ export function createControlPanel(
 
   const aoFolder = createFolder("AO", true);
   const aoBody = requireElement<HTMLDivElement>(aoFolder, ".folder-body");
-  const shadingFolder = createFolder("Lighting", true);
+  const shadingFolder = createFolder("LIGHTING", true);
   const shadingBody = requireElement<HTMLDivElement>(shadingFolder, ".folder-body");
-  bindSelect<AmbientOcclusionMode>(
-    aoBody,
-    "AO Mode",
+  const performanceFolder = createFolder("PERFORMANCE", true);
+  const performanceBody = requireElement<HTMLDivElement>(performanceFolder, ".folder-body");
+  const aoToggleState = { enabled: ambientOcclusionMode === "gtao" ? 1 : 0 };
+  bindCheckbox(aoBody, aoToggleState, "enabled", "AO", (_key, value): void => {
+    const nextMode: AmbientOcclusionMode = value > 0.5 ? "gtao" : "none";
+    ambientOcclusionMode = nextMode;
+    callbacks.onAmbientOcclusionModeChange(nextMode);
+  });
+  let fpsLimitMode: "30" | "60" | "unlimited" = "60";
+  bindSelect<"30" | "60" | "unlimited">(
+    performanceBody,
+    "FPS Limit",
     [
-      { label: "None", value: "none" },
-      { label: "GTAO", value: "gtao" },
-      { label: "SAO", value: "sao" },
+      { label: "30 FPS", value: "30" },
+      { label: "60 FPS", value: "60" },
+      { label: "Unlimited", value: "unlimited" },
     ],
-    ambientOcclusionMode,
+    fpsLimitMode,
     (value): void => {
-      ambientOcclusionMode = value;
-      callbacks.onAmbientOcclusionModeChange(value);
+      fpsLimitMode = value;
+      callbacks.onFpsLimitModeChange(value);
     },
   );
   bindRange(aoBody, ambientOcclusionParams, "intensity", {
@@ -1532,34 +1540,6 @@ export function createControlPanel(
     max: 3,
     step: 0.01,
     precision: 2,
-  }, callbacks.onAmbientOcclusionParamChange);
-  bindRange(aoBody, ambientOcclusionParams, "radius", {
-    label: "AO Radius",
-    min: 0.01,
-    max: 3,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onAmbientOcclusionParamChange);
-  bindRange(aoBody, ambientOcclusionParams, "thickness", {
-    label: "AO Thickness",
-    min: 0,
-    max: 4,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onAmbientOcclusionParamChange);
-  bindRange(aoBody, ambientOcclusionParams, "falloff", {
-    label: "AO Falloff",
-    min: 0.1,
-    max: 4,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onAmbientOcclusionParamChange);
-  bindRange(aoBody, ambientOcclusionParams, "denoiseRadius", {
-    label: "AO Denoise",
-    min: 1,
-    max: 24,
-    step: 1,
-    precision: 0,
   }, callbacks.onAmbientOcclusionParamChange);
   bindRange(shadingBody, shadingParams, "keyAzimuth", {
     label: "Key Azimuth",
@@ -1623,11 +1603,11 @@ export function createControlPanel(
   }, callbacks.onShadingParamChange);
   tabPanels.noise.appendChild(unifiedFolder);
   tabPanels.noise.appendChild(turboFolder);
-  tabPanels.noise.appendChild(advancedNoiseFolder);
   tabPanels.audio.appendChild(audioFolder);
   tabPanels.shader.appendChild(materialFolder);
   tabPanels.shader.appendChild(aoFolder);
   tabPanels.shader.appendChild(shadingFolder);
+  tabPanels.shader.appendChild(performanceFolder);
   tabPanels.interation.appendChild(interactionFolder);
   tabPanels.camera.appendChild(cameraFolder);
   tabPanels.ui.appendChild(uiFolder);
@@ -1661,6 +1641,20 @@ export function createControlPanel(
     }
   };
 
+  const onDefaultClick = async (): Promise<void> => {
+    if (defaultBusy) {
+      return;
+    }
+    defaultBusy = true;
+    refreshButtonState();
+    try {
+      await callbacks.onDefaultSelected();
+    } finally {
+      defaultBusy = false;
+      refreshButtonState();
+    }
+  };
+
   const onPlayClick = async (): Promise<void> => {
     if (playBusy || !playEnabled) {
       return;
@@ -1675,29 +1669,66 @@ export function createControlPanel(
     }
   };
 
+  const onRecordClick = async (): Promise<void> => {
+    if (recordBusy || !recordEnabled) {
+      return;
+    }
+    recordBusy = true;
+    refreshButtonState();
+    try {
+      await callbacks.onRecordToggle();
+    } finally {
+      recordBusy = false;
+      refreshButtonState();
+    }
+  };
+
+  const onDefaultButtonClick = (): void => {
+    void onDefaultClick();
+  };
   const onMicButtonClick = (): void => {
     void onMicClick();
   };
   const onPlayButtonClick = (): void => {
     void onPlayClick();
   };
+  const onRecordButtonClick = (): void => {
+    void onRecordClick();
+  };
+  const onUiVisibilityToggleClick = (): void => {
+    uiHidden = !uiHidden;
+    applyUiVisibility();
+  };
   const onWindowResize = (): void => {
     scheduleScrollbarTrackAnchorsUpdate();
+    scheduleHintPositionUpdate();
   };
   const onPanelScroll = (): void => {
     updateCustomScrollbarThumb();
   };
 
+  defaultButton.addEventListener("click", onDefaultButtonClick);
   fileInput.addEventListener("change", onFileChange);
   micButton.addEventListener("click", onMicButtonClick);
+  recordButton.addEventListener("click", onRecordButtonClick);
   playButton.addEventListener("click", onPlayButtonClick);
+  uiVisibilityButton.addEventListener("click", onUiVisibilityToggleClick);
   tabsPanels.addEventListener("scroll", onPanelScroll, { passive: true });
   window.addEventListener("resize", onWindowResize);
+  cleanup.push(() => defaultButton.removeEventListener("click", onDefaultButtonClick));
   cleanup.push(() => fileInput.removeEventListener("change", onFileChange));
   cleanup.push(() => micButton.removeEventListener("click", onMicButtonClick));
+  cleanup.push(() => recordButton.removeEventListener("click", onRecordButtonClick));
   cleanup.push(() => playButton.removeEventListener("click", onPlayButtonClick));
+  cleanup.push(() => uiVisibilityButton.removeEventListener("click", onUiVisibilityToggleClick));
   cleanup.push(() => tabsPanels.removeEventListener("scroll", onPanelScroll));
   cleanup.push(() => window.removeEventListener("resize", onWindowResize));
+  cleanup.push(() => {
+    if (hintPositionRafId !== 0) {
+      window.cancelAnimationFrame(hintPositionRafId);
+      hintPositionRafId = 0;
+    }
+  });
   cleanup.push(() => {
     if (scrollbarAnchorRafId !== 0) {
       window.cancelAnimationFrame(scrollbarAnchorRafId);
@@ -1709,6 +1740,8 @@ export function createControlPanel(
     }
   });
   setUiDepth(uiDepthState.value);
+  applyUiVisibility();
+  scheduleHintPositionUpdate();
 
   refreshButtonState();
 
@@ -1721,9 +1754,21 @@ export function createControlPanel(
       const clamped = Math.max(0, Math.min(1, level));
       energyFill.style.transform = `scaleX(${clamped.toFixed(3)})`;
     },
+    setFps(fps: number): void {
+      const safeFps = Number.isFinite(fps) ? Math.max(0, fps) : 0;
+      fpsReadoutElement.textContent = `FPS: ${safeFps.toFixed(0)}`;
+    },
     setMicActive(active: boolean): void {
       micButton.dataset.active = active ? "true" : "false";
-      micButton.textContent = active ? "Mic Live" : "Use Microphone";
+      micButton.textContent = active ? "Mic Live" : "Mic";
+    },
+    setRecordState(recording: boolean): void {
+      recordButton.dataset.active = recording ? "true" : "false";
+      recordButton.textContent = recording ? "Stop Rec" : "Record";
+    },
+    setRecordEnabled(enabled: boolean): void {
+      recordEnabled = enabled;
+      refreshButtonState();
     },
     setPlayState(playing: boolean): void {
       playButton.textContent = playing ? "Pause" : "Play";

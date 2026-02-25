@@ -7,6 +7,7 @@ export class AudioInputController {
   private readonly fftSize: number;
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
+  private recordingDestination: MediaStreamAudioDestinationNode | null = null;
   private elementSource: MediaElementAudioSourceNode | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
   private micStream: MediaStream | null = null;
@@ -38,6 +39,7 @@ export class AudioInputController {
       const AudioContextCtor = this.getAudioContextCtor();
       this.audioContext = new AudioContextCtor();
       this.analyser = this.audioContext.createAnalyser();
+      this.recordingDestination = this.audioContext.createMediaStreamDestination();
       this.analyser.fftSize = this.fftSize;
       this.analyser.smoothingTimeConstant = 0.8;
       this.analyser.minDecibels = -100;
@@ -64,6 +66,9 @@ export class AudioInputController {
     }
 
     source.connect(analyser);
+    if (this.recordingDestination) {
+      source.connect(this.recordingDestination);
+    }
     if (monitorOutput && this.audioContext) {
       source.connect(this.audioContext.destination);
       this.monitorSource = source;
@@ -125,6 +130,20 @@ export class AudioInputController {
     }
     this.fileUrl = URL.createObjectURL(file);
     this.audioElement.src = this.fileUrl;
+    this.audioElement.currentTime = 0;
+    this.audioElement.loop = true;
+    await this.audioElement.play();
+  }
+
+  async loadUrl(url: string): Promise<void> {
+    await this.ensureElementSource();
+
+    if (this.fileUrl) {
+      URL.revokeObjectURL(this.fileUrl);
+      this.fileUrl = null;
+    }
+
+    this.audioElement.src = url;
     this.audioElement.currentTime = 0;
     this.audioElement.loop = true;
     await this.audioElement.play();
@@ -199,6 +218,17 @@ export class AudioInputController {
     return this.fftData;
   }
 
+  getRecordingAudioTrack(): MediaStreamTrack | null {
+    if (!this.recordingDestination) {
+      return null;
+    }
+    const sourceTrack = this.recordingDestination.stream.getAudioTracks()[0];
+    if (!sourceTrack) {
+      return null;
+    }
+    return sourceTrack.clone();
+  }
+
   dispose(): void {
     this.stopMicSource();
     this.audioElement.pause();
@@ -218,6 +248,10 @@ export class AudioInputController {
     if (this.analyser) {
       this.analyser.disconnect();
       this.analyser = null;
+    }
+    if (this.recordingDestination) {
+      this.recordingDestination.disconnect();
+      this.recordingDestination = null;
     }
 
     if (this.fileUrl) {
