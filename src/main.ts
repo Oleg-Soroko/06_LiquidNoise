@@ -324,6 +324,18 @@ controlPanel = createControlPanel(
       }
     },
 
+    onSeekNormalized: async (value: number): Promise<void> => {
+      if (!audioController.hasLoadedFile() || audioController.mode !== "file") {
+        return;
+      }
+      const duration = audioElement.duration;
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return;
+      }
+      const clamped = Math.max(0, Math.min(1, value));
+      audioElement.currentTime = duration * clamped;
+    },
+
     onFpsLimitModeChange: (mode: FpsLimitMode): void => {
       fpsLimitMode = mode;
       fpsLimiterLastTickMs = 0;
@@ -448,6 +460,17 @@ function animate(timestampMs: number): void {
 
   scene.setAudioBands(bands);
   controlPanel.setEnergy(bands.level);
+  if (audioController.hasLoadedFile() && audioController.mode === "file") {
+    const duration = audioElement.duration;
+    const currentTime = audioElement.currentTime;
+    const progress =
+      Number.isFinite(duration) && duration > 0 && Number.isFinite(currentTime)
+        ? Math.max(0, Math.min(1, currentTime / duration))
+        : 0;
+    controlPanel.setPlaybackProgress(progress);
+  } else {
+    controlPanel.setPlaybackProgress(0);
+  }
   controlPanel.setFps(smoothedFps);
   scene.render(delta, elapsed);
 

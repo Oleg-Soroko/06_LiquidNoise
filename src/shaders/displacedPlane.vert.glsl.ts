@@ -5,6 +5,7 @@ varying float vHeight;
 
 uniform float uTime;
 uniform float uNoiseCore;
+uniform float uDriftPhase;
 
 uniform float uBaseFreq;
 uniform vec3 uBaseOffset;
@@ -322,7 +323,7 @@ void main() {
   vec2 domainScaled = position.xy * max(abs(uDomainScale), vec2(0.0001));
   vec2 domainPos = domainRotate * domainScaled;
   vec2 symmetryPos = applySymmetry(domainPos);
-  vec3 basePos = vec3(symmetryPos, uTime * uDriftSpeed) + uBaseOffset;
+  vec3 basePos = vec3(symmetryPos, uDriftPhase) + uBaseOffset;
   vec3 simplexInput = basePos * max(0.0001, uBaseFreq);
   if (uMouseNoiseOffset > 0.5) {
     float moveLen = length(uMouseMoveDir);
@@ -350,7 +351,7 @@ void main() {
   );
   float fine = coreNoise(
     simplexWarped * max(0.0001, uDetailFreq) +
-    vec3(0.0, 0.0, uTime * (uDriftSpeed * 1.9 + 0.03))
+    vec3(0.0, 0.0, uDriftPhase * 1.9 + uTime * 0.03)
   );
   float audioShape = finalRemap * macroAudio + fine * uHigh * uHighGain * uGlobalGain * uDetailStrength * uAudioDetailReactivity;
 

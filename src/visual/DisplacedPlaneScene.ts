@@ -47,6 +47,9 @@ export interface AudioMapParams {
   globalGain: number;
   attack: number;
   release: number;
+  driftAudioAmount: number;
+  finalAmpAudioAmount: number;
+  offsetZAudioAmount: number;
 }
 
 export interface InteractionParams {
@@ -121,7 +124,7 @@ export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
   baseFreq: 0.32,
   baseOffsetX: -8.0,
   baseOffsetY: -8.0,
-  baseOffsetZ: -8.0,
+  baseOffsetZ: 0.98,
   domainScaleX: 1.0,
   domainScaleY: 1.0,
   domainRotationDeg: 0.0,
@@ -150,12 +153,15 @@ export const DEFAULT_NOISE_PARAMS: HoudiniNoiseParams = {
 };
 
 export const DEFAULT_AUDIO_MAP_PARAMS: AudioMapParams = {
-  lowGain: 1.25,
-  midGain: 0.9,
-  highGain: 0.65,
+  lowGain: 3.0,
+  midGain: 3.0,
+  highGain: 3.0,
   globalGain: 1.2,
-  attack: 0.42,
-  release: 0.12,
+  attack: 0.98,
+  release: 0.24,
+  driftAudioAmount: 3.0,
+  finalAmpAudioAmount: 1.0,
+  offsetZAudioAmount: 1.0,
 };
 
 export const DEFAULT_INTERACTION_PARAMS: InteractionParams = {
@@ -253,10 +259,17 @@ const BACKGROUND_CIRCLE_FADE = 1;
 const DEFAULT_MATCAP_URL = "/gorilla2.jpg";
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const BASE_FREQ_SMOOTHING_HZ = 14;
+const AUDIO_MOTION_RISE_HZ = 5.4;
+const AUDIO_MOTION_FALL_HZ = 2.6;
+const AUDIO_DRIFT_ADD_RISE_HZ = 4.4;
+const AUDIO_DRIFT_ADD_FALL_HZ = 1.2;
+const AUDIO_OFFSET_Z_RISE_HZ = 4.2;
+const AUDIO_OFFSET_Z_FALL_HZ = 1.8;
 
 interface PlaneUniforms {
   uTime: THREE.IUniform<number>;
   uNoiseCore: THREE.IUniform<number>;
+  uDriftPhase: THREE.IUniform<number>;
   uBaseFreq: THREE.IUniform<number>;
   uBaseOffset: THREE.IUniform<THREE.Vector3>;
   uDomainScale: THREE.IUniform<THREE.Vector2>;
@@ -394,6 +407,11 @@ export class DisplacedPlaneScene {
   private audioLow = 0;
   private audioMid = 0;
   private audioHigh = 0;
+  private audioLevel = 0;
+  private audioMotionLevel = 0;
+  private audioDriftAdd = 0;
+  private audioOffsetZAdd = 0;
+  private driftPhase = 0;
   private baseFreqCurrent = DEFAULT_NOISE_PARAMS.baseFreq;
   private baseFreqTarget = DEFAULT_NOISE_PARAMS.baseFreq;
   private soloNoisePlane = false;
@@ -638,6 +656,7 @@ export class DisplacedPlaneScene {
     this.uniforms = {
       uTime: { value: 0 },
       uNoiseCore: { value: THREE.MathUtils.clamp(Math.round(this.noiseParams.noiseCore), 0, 2) },
+      uDriftPhase: { value: 0 },
       uBaseFreq: { value: this.baseFreqCurrent },
       uBaseOffset: {
         value: new THREE.Vector3(
@@ -1341,6 +1360,7 @@ export class DisplacedPlaneScene {
     this.audioLow = bands.low;
     this.audioMid = bands.mid;
     this.audioHigh = bands.high;
+    this.audioLevel = THREE.MathUtils.clamp(bands.level, 0, 1);
   }
 
   render(deltaSeconds: number, elapsedSeconds: number): void {
@@ -1378,6 +1398,35 @@ export class DisplacedPlaneScene {
     this.uniforms.uLow.value = this.audioLow;
     this.uniforms.uMid.value = this.audioMid;
     this.uniforms.uHigh.value = this.audioHigh;
+    const motionTarget = this.audioLevel;
+    const motionHz = motionTarget > this.audioMotionLevel ? AUDIO_MOTION_RISE_HZ : AUDIO_MOTION_FALL_HZ;
+    const motionSmoothing = 1 - Math.exp(-deltaSeconds * motionHz);
+    this.audioMotionLevel += (motionTarget - this.audioMotionLevel) * motionSmoothing;
+    const driftAmount = THREE.MathUtils.clamp(this.audioMapParams.driftAudioAmount, 0, 3);
+    const finalAmpAmount = THREE.MathUtils.clamp(this.audioMapParams.finalAmpAudioAmount, 0, 1);
+    const offsetZAmount = THREE.MathUtils.clamp(this.audioMapParams.offsetZAudioAmount, 0, 3);
+    const baseDriftSpeed = THREE.MathUtils.clamp(this.noiseParams.driftSpeed, 0, 0.65);
+    const baseFinalAmp = THREE.MathUtils.clamp(this.noiseParams.finalAmp, 0, 8);
+    const baseOffsetZ = this.noiseParams.baseOffsetZ;
+    const motion = THREE.MathUtils.clamp(Math.pow(this.audioMotionLevel, 0.78) * 1.45, 0, 1);
+    const driftDrive = THREE.MathUtils.clamp(Math.pow(this.audioLevel, 0.82) * 1.3, 0, 1);
+    const driftAddTarget = driftAmount * driftDrive * 0.55;
+    const driftAddHz = driftAddTarget > this.audioDriftAdd ? AUDIO_DRIFT_ADD_RISE_HZ : AUDIO_DRIFT_ADD_FALL_HZ;
+    const driftAddSmoothing = 1 - Math.exp(-deltaSeconds * driftAddHz);
+    this.audioDriftAdd += (driftAddTarget - this.audioDriftAdd) * driftAddSmoothing;
+    const offsetZDrive = THREE.MathUtils.clamp(Math.pow(this.audioLevel, 0.85) * 1.28, 0, 1);
+    const offsetZAddTarget = offsetZAmount * offsetZDrive * 3.5;
+    const offsetZHz = offsetZAddTarget > this.audioOffsetZAdd ? AUDIO_OFFSET_Z_RISE_HZ : AUDIO_OFFSET_Z_FALL_HZ;
+    const offsetZSmoothing = 1 - Math.exp(-deltaSeconds * offsetZHz);
+    this.audioOffsetZAdd += (offsetZAddTarget - this.audioOffsetZAdd) * offsetZSmoothing;
+    const audioFinalAmp = THREE.MathUtils.lerp(0.5, 8.0, motion);
+    const finalAmp = THREE.MathUtils.lerp(baseFinalAmp, audioFinalAmp, finalAmpAmount);
+    const driftSpeed = THREE.MathUtils.clamp(baseDriftSpeed + this.audioDriftAdd, 0, 2.4);
+    this.uniforms.uDriftSpeed.value = driftSpeed;
+    this.driftPhase += driftSpeed * deltaSeconds;
+    this.uniforms.uDriftPhase.value = this.driftPhase;
+    this.uniforms.uBaseOffset.value.z = baseOffsetZ + this.audioOffsetZAdd;
+    this.uniforms.uFinalAmp.value = THREE.MathUtils.clamp(finalAmp, 0.5, 8.0);
 
     this.clearCameraParallaxOffset();
     this.applyControlsReleaseInertia(deltaSeconds);

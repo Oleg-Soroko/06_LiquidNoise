@@ -30,6 +30,7 @@ export interface ControlCallbacks {
   onMicToggle(): Promise<void> | void;
   onRecordToggle(): Promise<void> | void;
   onPlayToggle(): Promise<void> | void;
+  onSeekNormalized(value: number): Promise<void> | void;
   onFpsLimitModeChange(mode: "30" | "60" | "unlimited"): void;
   onNoiseParamChange(key: keyof HoudiniNoiseParams, value: number): void;
   onAudioMapParamChange(key: keyof AudioMapParams, value: number): void;
@@ -54,6 +55,7 @@ export interface ControlPanelApi {
   setRecordEnabled(enabled: boolean): void;
   setPlayState(playing: boolean): void;
   setPlayEnabled(enabled: boolean): void;
+  setPlaybackProgress(value: number): void;
   dispose(): void;
 }
 
@@ -120,8 +122,11 @@ export function createControlPanel(
           </div>
           <div class="meter-row">
             <button id="play-toggle-btn" type="button" disabled>Play</button>
-            <div class="meter">
-              <div id="energy-fill" class="meter-fill"></div>
+            <div class="playback-bars">
+              <div class="meter">
+                <div id="energy-fill" class="meter-fill"></div>
+              </div>
+              <input id="seek-slider" class="seek-slider" type="range" min="0" max="1" step="0.001" value="0" disabled aria-label="Playback position" />
             </div>
           </div>
           <p id="status-line" class="status">Idle. Choose Default/Load or enable microphone.</p>
@@ -139,12 +144,15 @@ export function createControlPanel(
 
   const panelDockElement = requireElement<HTMLDivElement>(root, ".panel-dock");
   const uiVisibilityButton = requireElement<HTMLButtonElement>(root, "#ui-visibility-btn");
+  const titleElement = requireElement<HTMLHeadingElement>(root, ".title");
+  const projectDescriptionElement = requireElement<HTMLDivElement>(root, ".project-description");
   const defaultButton = requireElement<HTMLButtonElement>(root, "#default-audio-btn");
   const fileInput = requireElement<HTMLInputElement>(root, "#audio-file-input");
   const micButton = requireElement<HTMLButtonElement>(root, "#mic-toggle-btn");
   const recordButton = requireElement<HTMLButtonElement>(root, "#record-toggle-btn");
   const playButton = requireElement<HTMLButtonElement>(root, "#play-toggle-btn");
   const energyFill = requireElement<HTMLDivElement>(root, "#energy-fill");
+  const seekSlider = requireElement<HTMLInputElement>(root, "#seek-slider");
   const statusLine = requireElement<HTMLParagraphElement>(root, "#status-line");
   const tabsNavSlot = requireElement<HTMLDivElement>(root, "#tabs-nav-slot");
   const foldersRoot = requireElement<HTMLDivElement>(root, "#folders-root");
@@ -196,7 +204,23 @@ export function createControlPanel(
   let recordEnabled = true;
   let playBusy = false;
   let playEnabled = false;
+  let seekBusy = false;
   let uiHidden = false;
+  const defaultProjectTitle = "AFTER FORM NOISE";
+  const defaultProjectDescriptionLines = [
+    "Audio-reactive procedural displacement playground.",
+    "Real-time control for noise, shading, and camera behavior.",
+    "Use Default loop, load your own track, or drive with Mic.",
+  ];
+  const initialProjectDescriptionLines = Array.from(
+    projectDescriptionElement.querySelectorAll<HTMLParagraphElement>(".project-description-line"),
+  )
+    .map((lineElement) => lineElement.textContent?.trim() ?? "")
+    .filter((line) => line.length > 0);
+  let projectTitleText = (titleElement.textContent?.trim() ?? "") || defaultProjectTitle;
+  let projectDescriptionText = (
+    initialProjectDescriptionLines.length > 0 ? initialProjectDescriptionLines : defaultProjectDescriptionLines
+  ).join("\n");
   const visibleUiHandleText = "<\n<\n<\n<";
   const hiddenUiHandleText = ">\n>\n>\n>";
 
@@ -214,6 +238,36 @@ export function createControlPanel(
     micButton.disabled = micBusy;
     recordButton.disabled = recordBusy || !recordEnabled;
     playButton.disabled = playBusy || !playEnabled;
+    seekSlider.disabled = seekBusy || !playEnabled;
+  };
+
+  const setSeekProgress = (value: number): void => {
+    const clamped = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+    seekSlider.value = clamped.toFixed(4);
+    seekSlider.style.setProperty("--seek-progress", `${(clamped * 100).toFixed(2)}%`);
+  };
+
+  const applyProjectTitle = (value: string): void => {
+    const normalized = value.trim();
+    titleElement.textContent = normalized.length > 0 ? normalized : defaultProjectTitle;
+  };
+
+  const applyProjectDescription = (value: string): void => {
+    const normalized = value.replace(/\r\n/g, "\n");
+    const lines = normalized
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    const finalLines = lines.length > 0 ? lines : defaultProjectDescriptionLines;
+    while (projectDescriptionElement.firstChild) {
+      projectDescriptionElement.removeChild(projectDescriptionElement.firstChild);
+    }
+    for (const line of finalLines) {
+      const lineElement = document.createElement("p");
+      lineElement.className = "project-description-line";
+      lineElement.textContent = line;
+      projectDescriptionElement.appendChild(lineElement);
+    }
   };
 
   const createRangeRow = <T extends object, K extends keyof T>(
@@ -412,6 +466,57 @@ export function createControlPanel(
       onValue(fromHexColor(input.value));
     };
 
+    input.addEventListener("input", onInput);
+    cleanup.push(() => input.removeEventListener("input", onInput));
+
+    row.appendChild(label);
+    row.appendChild(input);
+    body.appendChild(row);
+  };
+
+  const bindTextField = (
+    body: HTMLElement,
+    labelText: string,
+    value: string,
+    onValue: (next: string) => void,
+    options?: { multiline?: boolean; rows?: number; placeholder?: string },
+  ): void => {
+    const row = document.createElement("div");
+    row.className = "control-row";
+
+    const label = document.createElement("label");
+    label.className = "control-label";
+    label.textContent = labelText;
+
+    if (options?.multiline) {
+      const textarea = document.createElement("textarea");
+      textarea.className = "control-textarea";
+      textarea.rows = options.rows ?? 3;
+      textarea.value = value;
+      if (options.placeholder) {
+        textarea.placeholder = options.placeholder;
+      }
+      const onInput = (): void => {
+        onValue(textarea.value);
+      };
+      textarea.addEventListener("input", onInput);
+      cleanup.push(() => textarea.removeEventListener("input", onInput));
+      row.appendChild(label);
+      row.appendChild(textarea);
+      body.appendChild(row);
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "control-text";
+    input.value = value;
+    if (options?.placeholder) {
+      input.placeholder = options.placeholder;
+    }
+    const onInput = (): void => {
+      onValue(input.value);
+    };
     input.addEventListener("input", onInput);
     cleanup.push(() => input.removeEventListener("input", onInput));
 
@@ -984,6 +1089,8 @@ export function createControlPanel(
   applyMenuPaddingTop(menuPaddingTopState.value);
   applyMenuPaddingBottom(menuPaddingBottomState.value);
   applyHeadFolderLightness(headFolderLightnessState.value);
+  applyProjectTitle(projectTitleText);
+  applyProjectDescription(projectDescriptionText);
 
   const unifiedFolder = createFolder("MAIN NOISE", true);
   const unifiedBody = requireElement<HTMLDivElement>(unifiedFolder, ".folder-body");
@@ -1065,13 +1172,6 @@ export function createControlPanel(
   latticePairRow.appendChild(latticeWarpRow);
   latticePairRow.appendChild(latticeWarpFreqRow);
   unifiedBody.appendChild(latticePairRow);
-  bindRange(unifiedBody, noiseParams, "baseOffsetZ", {
-    label: "Z Offset",
-    min: -8,
-    max: 8,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onNoiseParamChange);
   const symmetryModeRow = document.createElement("div");
   symmetryModeRow.className = "control-row";
   const symmetryModeLabel = document.createElement("label");
@@ -1180,6 +1280,34 @@ export function createControlPanel(
     label: "Global Gain",
     min: 0,
     max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAudioMapParamChange);
+  bindRange(audioBody, noiseParams, "baseOffsetZ", {
+    label: "Z Offset",
+    min: -8,
+    max: 8,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onNoiseParamChange);
+  bindRange(audioBody, audioMapParams, "driftAudioAmount", {
+    label: "Drift Audio",
+    min: 0,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAudioMapParamChange);
+  bindRange(audioBody, audioMapParams, "offsetZAudioAmount", {
+    label: "Z Offset Audio",
+    min: 0,
+    max: 3,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAudioMapParamChange);
+  bindRange(audioBody, audioMapParams, "finalAmpAudioAmount", {
+    label: "Final Amp Audio",
+    min: 0,
+    max: 1,
     step: 0.01,
     precision: 2,
   }, callbacks.onAudioMapParamChange);
@@ -1344,6 +1472,26 @@ export function createControlPanel(
     uiBevelStrengthState.value = value;
     applyUiBevelStrength(value);
   });
+  bindTextField(
+    uiBody,
+    "Main Title",
+    projectTitleText,
+    (next): void => {
+      projectTitleText = next;
+      applyProjectTitle(next);
+    },
+    { placeholder: defaultProjectTitle },
+  );
+  bindTextField(
+    uiBody,
+    "Description",
+    projectDescriptionText,
+    (next): void => {
+      projectDescriptionText = next;
+      applyProjectDescription(next);
+    },
+    { multiline: true, rows: 3, placeholder: defaultProjectDescriptionLines.join("\n") },
+  );
   bindColor(uiBody, "UI Text Color", uiTextColor, (next): void => {
     uiTextColor.r = next.r;
     uiTextColor.g = next.g;
@@ -1719,6 +1867,16 @@ export function createControlPanel(
   const onRecordButtonClick = (): void => {
     void onRecordClick();
   };
+  const onSeekSliderInput = (): void => {
+    const value = Number(seekSlider.value);
+    seekBusy = true;
+    setSeekProgress(value);
+    void Promise.resolve(callbacks.onSeekNormalized(Math.max(0, Math.min(1, value))))
+      .finally(() => {
+        seekBusy = false;
+        refreshButtonState();
+      });
+  };
   const onUiVisibilityToggleClick = (): void => {
     uiHidden = !uiHidden;
     applyUiVisibility();
@@ -1736,6 +1894,7 @@ export function createControlPanel(
   micButton.addEventListener("click", onMicButtonClick);
   recordButton.addEventListener("click", onRecordButtonClick);
   playButton.addEventListener("click", onPlayButtonClick);
+  seekSlider.addEventListener("input", onSeekSliderInput);
   uiVisibilityButton.addEventListener("click", onUiVisibilityToggleClick);
   tabsPanels.addEventListener("scroll", onPanelScroll, { passive: true });
   window.addEventListener("resize", onWindowResize);
@@ -1744,6 +1903,7 @@ export function createControlPanel(
   cleanup.push(() => micButton.removeEventListener("click", onMicButtonClick));
   cleanup.push(() => recordButton.removeEventListener("click", onRecordButtonClick));
   cleanup.push(() => playButton.removeEventListener("click", onPlayButtonClick));
+  cleanup.push(() => seekSlider.removeEventListener("input", onSeekSliderInput));
   cleanup.push(() => uiVisibilityButton.removeEventListener("click", onUiVisibilityToggleClick));
   cleanup.push(() => tabsPanels.removeEventListener("scroll", onPanelScroll));
   cleanup.push(() => window.removeEventListener("resize", onWindowResize));
@@ -1768,6 +1928,7 @@ export function createControlPanel(
   scheduleHintPositionUpdate();
 
   refreshButtonState();
+  setSeekProgress(0);
 
   return {
     setStatus(text: string, kind: "info" | "error" = "info"): void {
@@ -1800,6 +1961,12 @@ export function createControlPanel(
     setPlayEnabled(enabled: boolean): void {
       playEnabled = enabled;
       refreshButtonState();
+    },
+    setPlaybackProgress(value: number): void {
+      if (seekBusy) {
+        return;
+      }
+      setSeekProgress(value);
     },
     dispose(): void {
       for (const remove of cleanup) {
