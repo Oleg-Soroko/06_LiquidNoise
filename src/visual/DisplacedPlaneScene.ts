@@ -169,10 +169,10 @@ export const DEFAULT_QUALITY_PARAMS: QualityParams = {
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
   fov: 28,
-  minDistance: 12,
-  maxDistance: 24,
+  minDistance: 9.0,
+  maxDistance: 28.6,
   minPolarDeg: 0,
-  maxPolarDeg: 63,
+  maxPolarDeg: 67,
   minAzimuthDeg: -180,
   maxAzimuthDeg: 180,
   centerLock: 0,
@@ -196,7 +196,7 @@ export const DEFAULT_MATERIAL_PARAMS: MaterialParams = {
 export const DEFAULT_MATERIAL_MODE: MaterialMode = "matcap";
 
 export const DEFAULT_AMBIENT_OCCLUSION_PARAMS: AmbientOcclusionParams = {
-  mode: "gtao",
+  mode: "none",
   intensity: 1.86,
   radius: 0.36,
   thickness: 0.66,
