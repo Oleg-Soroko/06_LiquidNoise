@@ -1419,8 +1419,9 @@ export class DisplacedPlaneScene {
     const offsetZHz = offsetZAddTarget > this.audioOffsetZAdd ? AUDIO_OFFSET_Z_RISE_HZ : AUDIO_OFFSET_Z_FALL_HZ;
     const offsetZSmoothing = 1 - Math.exp(-deltaSeconds * offsetZHz);
     this.audioOffsetZAdd += (offsetZAddTarget - this.audioOffsetZAdd) * offsetZSmoothing;
-    const audioFinalAmp = THREE.MathUtils.lerp(0.5, 8.0, motion);
-    const finalAmp = THREE.MathUtils.lerp(baseFinalAmp, audioFinalAmp, finalAmpAmount);
+    const finalAmpHeadroom = Math.max(0, 8.0 - baseFinalAmp);
+    const finalAmpBoost = finalAmpHeadroom * motion * finalAmpAmount;
+    const finalAmp = baseFinalAmp + finalAmpBoost;
     const driftSpeed = THREE.MathUtils.clamp(baseDriftSpeed + this.audioDriftAdd, 0, 2.4);
     this.uniforms.uDriftSpeed.value = driftSpeed;
     this.driftPhase += driftSpeed * deltaSeconds;
