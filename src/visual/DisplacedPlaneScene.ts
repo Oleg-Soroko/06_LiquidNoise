@@ -45,6 +45,7 @@ export interface AudioMapParams {
   midGain: number;
   highGain: number;
   globalGain: number;
+  micSensitivity: number;
   attack: number;
   release: number;
   driftAudioAmount: number;
@@ -157,6 +158,7 @@ export const DEFAULT_AUDIO_MAP_PARAMS: AudioMapParams = {
   midGain: 3.0,
   highGain: 3.0,
   globalGain: 1.2,
+  micSensitivity: 1.0,
   attack: 0.98,
   release: 0.24,
   driftAudioAmount: 3.0,
@@ -165,8 +167,8 @@ export const DEFAULT_AUDIO_MAP_PARAMS: AudioMapParams = {
 };
 
 export const DEFAULT_INTERACTION_PARAMS: InteractionParams = {
-  mouseRadius: 0.5,
-  mouseStrength: 0.28,
+  mouseRadius: 0.525,
+  mouseStrength: 1.11,
   mouseNoiseOffset: 0,
   parallaxStrength: 0.0,
   edgeFade: 0.407,
@@ -175,19 +177,19 @@ export const DEFAULT_INTERACTION_PARAMS: InteractionParams = {
 };
 
 export const DEFAULT_QUALITY_PARAMS: QualityParams = {
-  subdivisions: 1024,
+  subdivisions: 1444,
 };
 
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
   fov: 28,
-  minDistance: 9.0,
-  maxDistance: 28.6,
-  minPolarDeg: 0,
-  maxPolarDeg: 67,
+  minDistance: 8.0,
+  maxDistance: 28.9,
+  minPolarDeg: 2,
+  maxPolarDeg: 68,
   minAzimuthDeg: -180,
   maxAzimuthDeg: 180,
   centerLock: 0,
-  panRange: 2.5,
+  panRange: 2.8,
   orbitTail: 1.0,
   panTail: 1.0,
 };

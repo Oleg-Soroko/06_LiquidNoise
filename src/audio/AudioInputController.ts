@@ -10,11 +10,13 @@ export class AudioInputController {
   private recordingDestination: MediaStreamAudioDestinationNode | null = null;
   private elementSource: MediaElementAudioSourceNode | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
+  private micGainNode: GainNode | null = null;
   private micStream: MediaStream | null = null;
   private currentSource: AudioNode | null = null;
   private monitorSource: AudioNode | null = null;
   private fftData = EMPTY_FFT;
   private fileUrl: string | null = null;
+  private micSensitivity = 1;
 
   mode: SourceMode = "none";
 
@@ -39,12 +41,17 @@ export class AudioInputController {
       const AudioContextCtor = this.getAudioContextCtor();
       this.audioContext = new AudioContextCtor();
       this.analyser = this.audioContext.createAnalyser();
+      this.micGainNode = this.audioContext.createGain();
+      this.micGainNode.gain.value = this.micSensitivity;
       this.recordingDestination = this.audioContext.createMediaStreamDestination();
       this.analyser.fftSize = this.fftSize;
       this.analyser.smoothingTimeConstant = 0.8;
       this.analyser.minDecibels = -100;
       this.analyser.maxDecibels = -10;
       this.fftData = new Uint8Array(this.analyser.frequencyBinCount);
+    } else if (!this.micGainNode) {
+      this.micGainNode = this.audioContext.createGain();
+      this.micGainNode.gain.value = this.micSensitivity;
     }
 
     if (this.audioContext.state === "suspended") {
@@ -83,6 +90,15 @@ export class AudioInputController {
       this.micSource.disconnect();
       this.micSource = null;
     }
+    if (this.micGainNode) {
+      this.micGainNode.disconnect();
+    }
+    if (this.currentSource === this.micGainNode) {
+      this.currentSource = null;
+    }
+    if (this.monitorSource === this.micGainNode) {
+      this.monitorSource = null;
+    }
     if (this.micStream) {
       for (const track of this.micStream.getTracks()) {
         track.stop();
@@ -111,6 +127,14 @@ export class AudioInputController {
   setSmoothing(value: number): void {
     if (this.analyser) {
       this.analyser.smoothingTimeConstant = value;
+    }
+  }
+
+  setMicSensitivity(value: number): void {
+    const next = Math.max(0.1, Math.min(4.0, Number.isFinite(value) ? value : 1));
+    this.micSensitivity = next;
+    if (this.micGainNode) {
+      this.micGainNode.gain.value = next;
     }
   }
 
@@ -178,7 +202,12 @@ export class AudioInputController {
 
     this.micStream = stream;
     this.micSource = this.audioContext.createMediaStreamSource(stream);
-    this.connectSource(this.micSource, false);
+    if (!this.micGainNode) {
+      this.micGainNode = this.audioContext.createGain();
+      this.micGainNode.gain.value = this.micSensitivity;
+    }
+    this.micSource.connect(this.micGainNode);
+    this.connectSource(this.micGainNode, false);
     this.mode = "mic";
   }
 
@@ -244,6 +273,10 @@ export class AudioInputController {
     if (this.elementSource) {
       this.elementSource.disconnect();
       this.elementSource = null;
+    }
+    if (this.micGainNode) {
+      this.micGainNode.disconnect();
+      this.micGainNode = null;
     }
     if (this.analyser) {
       this.analyser.disconnect();

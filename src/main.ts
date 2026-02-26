@@ -73,6 +73,7 @@ type FpsLimitMode = "30" | "60" | "unlimited";
 const DEFAULT_FPS_LIMIT_MODE: FpsLimitMode = "60";
 
 const audioController = new AudioInputController(audioElement);
+audioController.setMicSensitivity(audioMapParams.micSensitivity);
 const bandAnalyzer = new BandAnalyzer(audioMapParams.attack, audioMapParams.release);
 
 const supportsMediaRecording = typeof window !== "undefined" && "MediaRecorder" in window;
@@ -350,6 +351,9 @@ controlPanel = createControlPanel(
     onAudioMapParamChange: (key, value): void => {
       audioMapParams[key] = value;
       scene.setAudioMapParam(key, value);
+      if (key === "micSensitivity") {
+        audioController.setMicSensitivity(value);
+      }
       bandAnalyzer.setEnvelope(audioMapParams.attack, audioMapParams.release);
     },
 

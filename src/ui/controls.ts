@@ -105,20 +105,19 @@ export function createControlPanel(
     <div class="panel-dock" data-ui-hidden="false">
       <section class="panel">
         <div class="panel-head">
-          <h1 class="title">AFTER FORM NOISE</h1>
+          <h1 class="title">LIQUID NOISE</h1>
           <div class="project-description" aria-label="Project description">
             <p class="project-description-line">Audio-reactive procedural displacement playground.</p>
-            <p class="project-description-line">Real-time control for noise, shading, and camera behavior.</p>
             <p class="project-description-line">Use Default loop, load your own track, or drive with Mic.</p>
           </div>
           <div class="action-row">
-            <button id="default-audio-btn" type="button">Default</button>
+            <button id="default-audio-btn" type="button">Default sound</button>
             <label class="file-button">
               <input id="audio-file-input" type="file" accept="audio/*" />
-              <span>Load</span>
+              <span>Load mp3</span>
             </label>
             <button id="mic-toggle-btn" type="button">Mic</button>
-            <button id="record-toggle-btn" type="button">Record</button>
+            <button id="record-toggle-btn" type="button">Record video</button>
           </div>
           <div class="meter-row">
             <button id="play-toggle-btn" type="button" disabled>Play</button>
@@ -206,10 +205,9 @@ export function createControlPanel(
   let playEnabled = false;
   let seekBusy = false;
   let uiHidden = false;
-  const defaultProjectTitle = "AFTER FORM NOISE";
+  const defaultProjectTitle = "LIQUID NOISE";
   const defaultProjectDescriptionLines = [
     "Audio-reactive procedural displacement playground.",
-    "Real-time control for noise, shading, and camera behavior.",
     "Use Default loop, load your own track, or drive with Mic.",
   ];
   const initialProjectDescriptionLines = Array.from(
@@ -229,8 +227,7 @@ export function createControlPanel(
     panelDockElement.dataset.uiHidden = uiHidden ? "true" : "false";
     uiVisibilityButton.textContent = uiHidden ? hiddenUiHandleText : visibleUiHandleText;
     uiVisibilityButton.setAttribute("aria-label", uiHidden ? "Show UI" : "Hide UI");
-    scheduleScrollbarTrackAnchorsUpdate();
-    scheduleHintPositionUpdate();
+    scheduleScrollbarTrackAnchorsUpdate(false);
   };
 
   const refreshButtonState = (): void => {
@@ -449,7 +446,7 @@ export function createControlPanel(
     labelText: string,
     color: { r: number; g: number; b: number },
     onValue: (next: { r: number; g: number; b: number }) => void,
-  ): void => {
+  ): HTMLInputElement => {
     const row = document.createElement("div");
     row.className = "control-row";
 
@@ -472,6 +469,7 @@ export function createControlPanel(
     row.appendChild(label);
     row.appendChild(input);
     body.appendChild(row);
+    return input;
   };
 
   const bindTextField = (
@@ -590,13 +588,12 @@ export function createControlPanel(
     body.appendChild(row);
   };
 
-  const bindSelect = <T extends string>(
-    body: HTMLElement,
+  const createSelectRow = <T extends string>(
     labelText: string,
     options: Array<{ label: string; value: T }>,
     initialValue: T,
     onValue: (value: T) => void,
-  ): void => {
+  ): HTMLDivElement => {
     const row = document.createElement("div");
     row.className = "control-row";
 
@@ -604,25 +601,138 @@ export function createControlPanel(
     label.className = "control-label";
     label.textContent = labelText;
 
-    const select = document.createElement("select");
-    select.className = "control-select";
+    const selectRoot = document.createElement("div");
+    selectRoot.className = "control-select";
+    selectRoot.dataset.open = "false";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "control-select-trigger";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+
+    const valueElement = document.createElement("span");
+    valueElement.className = "control-select-value";
+    trigger.appendChild(valueElement);
+
+    const menu = document.createElement("div");
+    menu.className = "control-select-menu";
+    menu.setAttribute("role", "listbox");
+
+    const resolveOption = (value: T): { label: string; value: T } => {
+      return options.find((optionData) => optionData.value === value) ?? options[0];
+    };
+
+    let currentValue = resolveOption(initialValue).value;
+
+    const optionButtons: Array<{ value: T; element: HTMLButtonElement }> = [];
+
+    const setOpen = (open: boolean): void => {
+      selectRoot.dataset.open = open ? "true" : "false";
+      trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+
+    const setValue = (value: T, emit: boolean): void => {
+      const option = resolveOption(value);
+      currentValue = option.value;
+      valueElement.textContent = option.label;
+      for (const optionButton of optionButtons) {
+        const selected = optionButton.value === currentValue;
+        optionButton.element.dataset.selected = selected ? "true" : "false";
+        optionButton.element.setAttribute("aria-selected", selected ? "true" : "false");
+      }
+      if (emit) {
+        onValue(currentValue);
+      }
+    };
+
     for (const optionData of options) {
-      const option = document.createElement("option");
-      option.value = optionData.value;
-      option.textContent = optionData.label;
-      option.selected = optionData.value === initialValue;
-      select.appendChild(option);
+      const optionButton = document.createElement("button");
+      optionButton.type = "button";
+      optionButton.className = "control-select-option";
+      optionButton.textContent = optionData.label;
+      optionButton.dataset.value = optionData.value;
+      optionButton.dataset.selected = "false";
+      optionButton.setAttribute("role", "option");
+      optionButton.setAttribute("aria-selected", "false");
+
+      const onOptionClick = (): void => {
+        setValue(optionData.value, true);
+        setOpen(false);
+        trigger.focus();
+      };
+
+      optionButton.addEventListener("click", onOptionClick);
+      cleanup.push(() => optionButton.removeEventListener("click", onOptionClick));
+      optionButtons.push({ value: optionData.value, element: optionButton });
+      menu.appendChild(optionButton);
     }
 
-    const onChange = (): void => {
-      onValue(select.value as T);
+    const onTriggerClick = (): void => {
+      const isOpen = selectRoot.dataset.open === "true";
+      setOpen(!isOpen);
     };
-    select.addEventListener("change", onChange);
-    cleanup.push(() => select.removeEventListener("change", onChange));
+
+    const onTriggerKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        const isOpen = selectRoot.dataset.open === "true";
+        setOpen(!isOpen);
+        return;
+      }
+      if (event.key === "Escape") {
+        if (selectRoot.dataset.open === "true") {
+          event.preventDefault();
+          setOpen(false);
+        }
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+        return;
+      }
+      event.preventDefault();
+      const currentIndex = options.findIndex((optionData) => optionData.value === currentValue);
+      const fallbackIndex = currentIndex >= 0 ? currentIndex : 0;
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex = (fallbackIndex + direction + options.length) % options.length;
+      setValue(options[nextIndex].value, true);
+    };
+
+    const onDocumentPointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (!selectRoot.contains(target)) {
+        setOpen(false);
+      }
+    };
+
+    trigger.addEventListener("click", onTriggerClick);
+    trigger.addEventListener("keydown", onTriggerKeyDown);
+    document.addEventListener("pointerdown", onDocumentPointerDown);
+    cleanup.push(() => trigger.removeEventListener("click", onTriggerClick));
+    cleanup.push(() => trigger.removeEventListener("keydown", onTriggerKeyDown));
+    cleanup.push(() => document.removeEventListener("pointerdown", onDocumentPointerDown));
+
+    setValue(initialValue, false);
+
+    selectRoot.appendChild(trigger);
+    selectRoot.appendChild(menu);
 
     row.appendChild(label);
-    row.appendChild(select);
-    body.appendChild(row);
+    row.appendChild(selectRoot);
+    return row;
+  };
+
+  const bindSelect = <T extends string>(
+    body: HTMLElement,
+    labelText: string,
+    options: Array<{ label: string; value: T }>,
+    initialValue: T,
+    onValue: (value: T) => void,
+  ): void => {
+    body.appendChild(createSelectRow(labelText, options, initialValue, onValue));
   };
 
   type TabKey = "noise" | "audio" | "shader" | "interation" | "camera" | "ui";
@@ -685,6 +795,7 @@ export function createControlPanel(
   const initialSliderColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--slider-fill"), initialUiColor);
   const initialScrollbarColor = normalizeHexColor(rootComputedStyle.getPropertyValue("--ui-scrollbar-color"), "#7e8999");
   const parsedUiScale = Number.parseFloat(rootComputedStyle.getPropertyValue("--ui-scale"));
+  const parsedUiWidthScale = Number.parseFloat(rootComputedStyle.getPropertyValue("--ui-width-scale"));
   const parsedUiBevelStrength = Number.parseFloat(rootComputedStyle.getPropertyValue("--ui-bevel-strength"));
   const parsedMenuSectionGap = Number.parseFloat(rootComputedStyle.getPropertyValue("--menu-section-gap"));
   const parsedMenuPaddingTop = Number.parseFloat(rootComputedStyle.getPropertyValue("--panel-content-pad-top"));
@@ -692,6 +803,9 @@ export function createControlPanel(
   const parsedHeadFolderLightness = Number.parseFloat(rootComputedStyle.getPropertyValue("--head-folder-lightness"));
   const uiScaleState = {
     value: Number.isFinite(parsedUiScale) && parsedUiScale > 0 ? parsedUiScale : 1,
+  };
+  const uiWidthScaleState = {
+    value: Number.isFinite(parsedUiWidthScale) && parsedUiWidthScale > 0 ? parsedUiWidthScale : 1,
   };
   const uiBevelStrengthState = {
     value: Number.isFinite(parsedUiBevelStrength) && parsedUiBevelStrength > 0 ? parsedUiBevelStrength : 1,
@@ -716,6 +830,42 @@ export function createControlPanel(
   const uiSliderColor = fromHexColor(initialSliderColor);
   const uiScrollbarColor = fromHexColor(initialScrollbarColor);
   const panelHeadShadow = { r: 11 / 255, g: 17 / 255, b: 26 / 255 };
+  type UiThemePreset = {
+    text: string;
+    folderTitle: string;
+    main: string;
+    head: string;
+    accent: string;
+    sliderFill: string;
+    scrollbar: string;
+  };
+  const uiThemePresets: Record<MaterialMode, UiThemePreset> = {
+    matcap: {
+      text: "#d5deeb",
+      folderTitle: "#d2dbe9",
+      main: "#3a3b42",
+      head: "#26303d",
+      accent: "#a8d2ff",
+      sliderFill: "#a8d2ff",
+      scrollbar: "#97a3b4",
+    },
+    pbr: {
+      text: "#dde3ea",
+      folderTitle: "#d8dee6",
+      main: "#454545",
+      head: "#3f454d",
+      accent: "#f3f6fa",
+      sliderFill: "#9ec7f4",
+      scrollbar: "#b8bec6",
+    },
+  };
+  let uiTextColorInput: HTMLInputElement | null = null;
+  let folderTitleColorInput: HTMLInputElement | null = null;
+  let mainUiColorInput: HTMLInputElement | null = null;
+  let headColorInput: HTMLInputElement | null = null;
+  let accentColorInput: HTMLInputElement | null = null;
+  let sliderFillColorInput: HTMLInputElement | null = null;
+  let scrollbarColorInput: HTMLInputElement | null = null;
 
   const clamp = (value: number, min: number, max: number): number => {
     return Math.max(min, Math.min(max, value));
@@ -814,6 +964,9 @@ export function createControlPanel(
   };
 
   const updateHintPosition = (): void => {
+    if (uiHidden) {
+      return;
+    }
     if (!root.isConnected || !panelElement.isConnected || !hintRowElement.isConnected) {
       return;
     }
@@ -970,14 +1123,16 @@ export function createControlPanel(
     updateCustomScrollbarThumb();
   };
 
-  const scheduleScrollbarTrackAnchorsUpdate = (): void => {
+  const scheduleScrollbarTrackAnchorsUpdate = (syncHint = true): void => {
     if (scrollbarAnchorRafId !== 0) {
       window.cancelAnimationFrame(scrollbarAnchorRafId);
     }
     scrollbarAnchorRafId = window.requestAnimationFrame(() => {
       scrollbarAnchorRafId = 0;
       updateScrollbarTrackAnchors();
-      updateHintPosition();
+      if (syncHint) {
+        updateHintPosition();
+      }
     });
   };
 
@@ -1042,6 +1197,13 @@ export function createControlPanel(
     scheduleScrollbarTrackAnchorsUpdate();
   };
 
+  const applyUiWidthScale = (value: number): void => {
+    const clamped = clamp(value, 0.6, 1.8);
+    documentStyle.setProperty("--ui-width-scale", clamped.toFixed(2));
+    syncScrollbarFit();
+    scheduleScrollbarTrackAnchorsUpdate();
+  };
+
   const applyUiBevelStrength = (value: number): void => {
     const clamped = clamp(value, 0.6, 1.8);
     documentStyle.setProperty("--ui-bevel-strength", clamped.toFixed(2));
@@ -1077,14 +1239,57 @@ export function createControlPanel(
     scheduleScrollbarTrackAnchorsUpdate();
   };
 
-  applyUiTextColor(uiTextColor);
-  applyFolderTitleColor(uiFolderTitleColor);
-  applyUiMainColor(uiMainColor);
-  applyUiColor(uiAccentColor);
+  const setColorStateFromHex = (state: { r: number; g: number; b: number }, hex: string): void => {
+    const next = fromHexColor(hex);
+    state.r = next.r;
+    state.g = next.g;
+    state.b = next.b;
+  };
+
+  const syncThemeColorInputs = (): void => {
+    if (uiTextColorInput) {
+      uiTextColorInput.value = toHexColor(uiTextColor.r, uiTextColor.g, uiTextColor.b);
+    }
+    if (folderTitleColorInput) {
+      folderTitleColorInput.value = toHexColor(uiFolderTitleColor.r, uiFolderTitleColor.g, uiFolderTitleColor.b);
+    }
+    if (mainUiColorInput) {
+      mainUiColorInput.value = toHexColor(uiMainColor.r, uiMainColor.g, uiMainColor.b);
+    }
+    if (headColorInput) {
+      headColorInput.value = toHexColor(panelHeadColor.r, panelHeadColor.g, panelHeadColor.b);
+    }
+    if (accentColorInput) {
+      accentColorInput.value = toHexColor(uiAccentColor.r, uiAccentColor.g, uiAccentColor.b);
+    }
+    if (sliderFillColorInput) {
+      sliderFillColorInput.value = toHexColor(uiSliderColor.r, uiSliderColor.g, uiSliderColor.b);
+    }
+    if (scrollbarColorInput) {
+      scrollbarColorInput.value = toHexColor(uiScrollbarColor.r, uiScrollbarColor.g, uiScrollbarColor.b);
+    }
+  };
+
+  const applyUiThemePreset = (mode: MaterialMode): void => {
+    const preset = uiThemePresets[mode];
+    setColorStateFromHex(uiTextColor, preset.text);
+    applyUiTextColor(uiTextColor);
+    setColorStateFromHex(uiFolderTitleColor, preset.folderTitle);
+    applyFolderTitleColor(uiFolderTitleColor);
+    setColorStateFromHex(uiMainColor, preset.main);
+    applyUiMainColor(uiMainColor);
+    setColorStateFromHex(uiAccentColor, preset.accent);
+    applyUiColor(uiAccentColor);
+    setColorStateFromHex(uiSliderColor, preset.sliderFill);
+    applyUiSliderColor(uiSliderColor);
+    setColorStateFromHex(uiScrollbarColor, preset.scrollbar);
+    applyUiScrollbarColor(uiScrollbarColor);
+    syncThemeColorInputs();
+  };
+
   applyUiBevelStrength(uiBevelStrengthState.value);
+  applyUiWidthScale(uiWidthScaleState.value);
   applyUiScale(uiScaleState.value);
-  applyUiSliderColor(uiSliderColor);
-  applyUiScrollbarColor(uiScrollbarColor);
   applyMenuSectionGap(menuSectionGapState.value);
   applyMenuPaddingTop(menuPaddingTopState.value);
   applyMenuPaddingBottom(menuPaddingBottomState.value);
@@ -1172,34 +1377,31 @@ export function createControlPanel(
   latticePairRow.appendChild(latticeWarpRow);
   latticePairRow.appendChild(latticeWarpFreqRow);
   unifiedBody.appendChild(latticePairRow);
-  const symmetryModeRow = document.createElement("div");
-  symmetryModeRow.className = "control-row";
-  const symmetryModeLabel = document.createElement("label");
-  symmetryModeLabel.className = "control-label";
-  symmetryModeLabel.textContent = "Symmetry";
-  const symmetryModeSelect = document.createElement("select");
-  symmetryModeSelect.className = "control-select";
-  const symmetryModeOptions: Array<{ label: string; value: number }> = [
-    { label: "Off", value: 0 },
-    { label: "Single", value: 1 },
-    { label: "Cross", value: 2 },
-  ];
-  for (const optionData of symmetryModeOptions) {
-    const option = document.createElement("option");
-    option.value = String(optionData.value);
-    option.textContent = optionData.label;
-    option.selected = Math.round(noiseParams.symmetryMode) === optionData.value;
-    symmetryModeSelect.appendChild(option);
-  }
-  const onSymmetryModeChange = (): void => {
-    const value = Number(symmetryModeSelect.value);
-    noiseParams.symmetryMode = value;
-    callbacks.onNoiseParamChange("symmetryMode", value);
+  type SymmetryModeOption = "0" | "1" | "2";
+  const toSymmetryModeOption = (value: number): SymmetryModeOption => {
+    const mode = Math.round(value);
+    if (mode === 1) {
+      return "1";
+    }
+    if (mode >= 2) {
+      return "2";
+    }
+    return "0";
   };
-  symmetryModeSelect.addEventListener("change", onSymmetryModeChange);
-  cleanup.push(() => symmetryModeSelect.removeEventListener("change", onSymmetryModeChange));
-  symmetryModeRow.appendChild(symmetryModeLabel);
-  symmetryModeRow.appendChild(symmetryModeSelect);
+  const symmetryModeRow = createSelectRow<SymmetryModeOption>(
+    "Symmetry",
+    [
+      { label: "Off", value: "0" },
+      { label: "Single", value: "1" },
+      { label: "Cross", value: "2" },
+    ],
+    toSymmetryModeOption(noiseParams.symmetryMode),
+    (value): void => {
+      const numericValue = Number(value);
+      noiseParams.symmetryMode = numericValue;
+      callbacks.onNoiseParamChange("symmetryMode", numericValue);
+    },
+  );
   const symmetryPairRow = document.createElement("div");
   symmetryPairRow.className = "control-row-pair";
   const symmetryWidthRow = createRangeRow(noiseParams, "symmetryWidth", {
@@ -1283,6 +1485,13 @@ export function createControlPanel(
     step: 0.01,
     precision: 2,
   }, callbacks.onAudioMapParamChange);
+  bindRange(audioBody, audioMapParams, "micSensitivity", {
+    label: "Mic Sensitivity",
+    min: 0.1,
+    max: 4.0,
+    step: 0.01,
+    precision: 2,
+  }, callbacks.onAudioMapParamChange);
   bindRange(audioBody, noiseParams, "baseOffsetZ", {
     label: "Z Offset",
     min: -8,
@@ -1349,13 +1558,6 @@ export function createControlPanel(
     "Mouse Noise Offset",
     callbacks.onInteractionParamChange,
   );
-  bindRange(interactionBody, interactionParams, "parallaxStrength", {
-    label: "Parallax",
-    min: 0,
-    max: 2.0,
-    step: 0.01,
-    precision: 2,
-  }, callbacks.onInteractionParamChange);
   bindRange(interactionBody, interactionParams, "edgeFade", {
     label: "Edge Fade",
     min: 0.1,
@@ -1492,25 +1694,25 @@ export function createControlPanel(
     },
     { multiline: true, rows: 3, placeholder: defaultProjectDescriptionLines.join("\n") },
   );
-  bindColor(uiBody, "UI Text Color", uiTextColor, (next): void => {
+  uiTextColorInput = bindColor(uiBody, "UI Text Color", uiTextColor, (next): void => {
     uiTextColor.r = next.r;
     uiTextColor.g = next.g;
     uiTextColor.b = next.b;
     applyUiTextColor(uiTextColor);
   });
-  bindColor(uiBody, "Folder Name Color", uiFolderTitleColor, (next): void => {
+  folderTitleColorInput = bindColor(uiBody, "Folder Name Color", uiFolderTitleColor, (next): void => {
     uiFolderTitleColor.r = next.r;
     uiFolderTitleColor.g = next.g;
     uiFolderTitleColor.b = next.b;
     applyFolderTitleColor(uiFolderTitleColor);
   });
-  bindColor(uiBody, "Main UI Color", uiMainColor, (next): void => {
+  mainUiColorInput = bindColor(uiBody, "Main UI Color", uiMainColor, (next): void => {
     uiMainColor.r = next.r;
     uiMainColor.g = next.g;
     uiMainColor.b = next.b;
     applyUiMainColor(uiMainColor);
   });
-  bindColor(uiBody, "Head Color", panelHeadColor, (next): void => {
+  headColorInput = bindColor(uiBody, "Head Color", panelHeadColor, (next): void => {
     panelHeadColor.r = next.r;
     panelHeadColor.g = next.g;
     panelHeadColor.b = next.b;
@@ -1526,19 +1728,19 @@ export function createControlPanel(
     headFolderLightnessState.value = value;
     applyHeadFolderLightness(value);
   });
-  bindColor(uiBody, "Accent Color", uiAccentColor, (next): void => {
+  accentColorInput = bindColor(uiBody, "Accent Color", uiAccentColor, (next): void => {
     uiAccentColor.r = next.r;
     uiAccentColor.g = next.g;
     uiAccentColor.b = next.b;
     applyUiColor(uiAccentColor);
   });
-  bindColor(uiBody, "Slider Fill", uiSliderColor, (next): void => {
+  sliderFillColorInput = bindColor(uiBody, "Slider Fill", uiSliderColor, (next): void => {
     uiSliderColor.r = next.r;
     uiSliderColor.g = next.g;
     uiSliderColor.b = next.b;
     applyUiSliderColor(uiSliderColor);
   });
-  bindColor(uiBody, "Scrollbar Color", uiScrollbarColor, (next): void => {
+  scrollbarColorInput = bindColor(uiBody, "Scrollbar Color", uiScrollbarColor, (next): void => {
     uiScrollbarColor.r = next.r;
     uiScrollbarColor.g = next.g;
     uiScrollbarColor.b = next.b;
@@ -1553,6 +1755,16 @@ export function createControlPanel(
   }, (_key, value): void => {
     uiScaleState.value = value;
     applyUiScale(value);
+  });
+  bindRange(uiBody, uiWidthScaleState, "value", {
+    label: "UI Width",
+    min: 0.6,
+    max: 1.8,
+    step: 0.01,
+    precision: 2,
+  }, (_key, value): void => {
+    uiWidthScaleState.value = value;
+    applyUiWidthScale(value);
   });
   bindRange(uiBody, menuSectionGapState, "value", {
     label: "Folder Gap",
@@ -1608,6 +1820,7 @@ export function createControlPanel(
     (value): void => {
       materialMode = value;
       callbacks.onMaterialModeChange(value);
+      applyUiThemePreset(value);
       updateMaterialModeVisibility();
     },
   );
@@ -1678,6 +1891,7 @@ export function createControlPanel(
   materialBody.appendChild(pbrMaterialBody);
   materialBody.appendChild(matcapMaterialBody);
   updateMaterialModeVisibility();
+  applyUiThemePreset(materialMode);
 
   const aoFolder = createFolder("AO", true);
   const aoBody = requireElement<HTMLDivElement>(aoFolder, ".folder-body");
@@ -1949,7 +2163,7 @@ export function createControlPanel(
     },
     setRecordState(recording: boolean): void {
       recordButton.dataset.active = recording ? "true" : "false";
-      recordButton.textContent = recording ? "Stop Rec" : "Record";
+      recordButton.textContent = recording ? "Stop video" : "Record video";
     },
     setRecordEnabled(enabled: boolean): void {
       recordEnabled = enabled;
