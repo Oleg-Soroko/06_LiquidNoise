@@ -267,6 +267,9 @@ const AUDIO_DRIFT_ADD_RISE_HZ = 4.4;
 const AUDIO_DRIFT_ADD_FALL_HZ = 1.2;
 const AUDIO_OFFSET_Z_RISE_HZ = 4.2;
 const AUDIO_OFFSET_Z_FALL_HZ = 1.8;
+const MOBILE_REFERENCE_ASPECT = 16 / 9;
+const MOBILE_MAX_FOV_DEG = 62;
+const MOBILE_MIN_ASPECT = 0.2;
 
 interface PlaneUniforms {
   uTime: THREE.IUniform<number>;
@@ -1452,7 +1455,25 @@ export class DisplacedPlaneScene {
     this.composer.setPixelRatio(dpr);
     this.composer.setSize(width, height);
     this.aoDepthTarget.setSize(Math.max(1, Math.floor(width * dpr)), Math.max(1, Math.floor(height * dpr)));
-    this.camera.aspect = width / height;
+    const aspect = width / height;
+    this.camera.aspect = aspect;
+    const baseFov = THREE.MathUtils.clamp(this.cameraParams.fov, 20, 100);
+    const isLikelyMobile =
+      typeof window !== "undefined" &&
+      window.matchMedia("(pointer: coarse)").matches &&
+      Math.min(window.innerWidth, window.innerHeight) <= 900;
+    if (isLikelyMobile && aspect < 1) {
+      const baseFovRad = THREE.MathUtils.degToRad(baseFov);
+      const referenceHFov = 2 * Math.atan(Math.tan(baseFovRad * 0.5) * MOBILE_REFERENCE_ASPECT);
+      const adaptiveVFov = 2 * Math.atan(Math.tan(referenceHFov * 0.5) / Math.max(MOBILE_MIN_ASPECT, aspect));
+      this.camera.fov = THREE.MathUtils.clamp(
+        THREE.MathUtils.radToDeg(adaptiveVFov),
+        baseFov,
+        MOBILE_MAX_FOV_DEG,
+      );
+    } else {
+      this.camera.fov = baseFov;
+    }
     this.camera.updateProjectionMatrix();
   }
 
