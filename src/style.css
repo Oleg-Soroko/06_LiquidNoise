@@ -166,8 +166,7 @@ body {
 }
 
 .panel-dock {
-  --ui-hide-btn-width: clamp(0.84rem, calc(0.92rem * var(--ui-scale)), 1.06rem);
-  --ui-hide-btn-height: clamp(8.4rem, calc(9.5rem * var(--ui-scale)), 11.8rem);
+  --ui-hide-btn-size: clamp(2.51rem, calc(2.84rem * var(--ui-scale)), 3.19rem);
   position: relative;
   width: fit-content;
   pointer-events: none;
@@ -212,21 +211,22 @@ body {
 
 .ui-visibility-btn {
   position: absolute;
-  top: clamp(1.05rem, calc(1.2rem * var(--ui-scale)), 1.7rem);
-  left: calc((var(--ui-hide-btn-width) * -1) + 0.22rem);
-  width: var(--ui-hide-btn-width);
-  min-height: var(--ui-hide-btn-height);
-  padding: 0.28rem 0;
+  top: clamp(0.7rem, calc(0.84rem * var(--ui-scale)), 1.14rem);
+  left: clamp(0.28rem, calc(0.36rem * var(--ui-scale)), 0.58rem);
+  width: var(--ui-hide-btn-size);
+  min-height: var(--ui-hide-btn-size);
+  height: var(--ui-hide-btn-size);
+  padding: 0;
   border-radius: var(--radius-button);
   text-transform: none;
   letter-spacing: 0;
-  font-size: 0.58rem;
-  line-height: 1.06;
-  white-space: pre-line;
+  line-height: 1;
+  white-space: normal;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
+  z-index: 8;
   transition:
     transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 160ms ease,
@@ -234,8 +234,36 @@ body {
     color 160ms ease;
 }
 
+.ui-visibility-icon {
+  position: relative;
+  display: block;
+  width: clamp(1rem, calc(1.08rem * var(--ui-scale)), 1.3rem);
+  height: clamp(0.68rem, calc(0.78rem * var(--ui-scale)), 0.97rem);
+  color: currentColor;
+}
+
+.ui-visibility-icon::before,
+.ui-visibility-icon::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.ui-visibility-icon::before {
+  top: 0;
+  box-shadow: 0 calc(0.32rem * var(--ui-scale)) 0 currentColor;
+}
+
+.ui-visibility-icon::after {
+  bottom: 0;
+}
+
 .panel-dock[data-ui-hidden="true"] .ui-visibility-btn {
-  transform: translateX(0.08rem);
+  transform: translateX(0.16rem);
 }
 
 .hint-row {
@@ -1130,8 +1158,7 @@ button:disabled {
   }
 
   .panel-dock {
-    --ui-hide-btn-width: clamp(0.78rem, calc(0.88rem * var(--ui-scale)), 0.98rem);
-    --ui-hide-btn-height: clamp(7.2rem, calc(8.4rem * var(--ui-scale)), 10.4rem);
+    --ui-hide-btn-size: clamp(2.24rem, calc(2.62rem * var(--ui-scale)), 2.97rem);
   }
 
   .panel {
@@ -1140,8 +1167,8 @@ button:disabled {
   }
 
   .ui-visibility-btn {
-    top: clamp(0.96rem, calc(1.08rem * var(--ui-scale)), 1.5rem);
-    left: calc((var(--ui-hide-btn-width) * -1) + 0.2rem);
+    top: clamp(0.6rem, calc(0.76rem * var(--ui-scale)), 1.02rem);
+    left: clamp(0.18rem, calc(0.26rem * var(--ui-scale)), 0.44rem);
   }
 
   .action-row {

@@ -133,7 +133,9 @@ export function createControlPanel(
         </div>
         <div id="folders-root" class="folders-root"></div>
       </section>
-      <button id="ui-visibility-btn" class="ui-visibility-btn" type="button" aria-label="Hide UI">&lt;</button>
+      <button id="ui-visibility-btn" class="ui-visibility-btn" type="button" aria-label="Hide UI">
+        <span class="ui-visibility-icon" aria-hidden="true"></span>
+      </button>
     </div>
     <div class="hint-row">
       <div id="fps-readout" class="fps-readout">FPS: --</div>
@@ -219,13 +221,9 @@ export function createControlPanel(
   let projectDescriptionText = (
     initialProjectDescriptionLines.length > 0 ? initialProjectDescriptionLines : defaultProjectDescriptionLines
   ).join("\n");
-  const visibleUiHandleText = "<\n<\n<\n<";
-  const hiddenUiHandleText = ">\n>\n>\n>";
-
   const applyUiVisibility = (): void => {
     root.dataset.uiHidden = uiHidden ? "true" : "false";
     panelDockElement.dataset.uiHidden = uiHidden ? "true" : "false";
-    uiVisibilityButton.textContent = uiHidden ? hiddenUiHandleText : visibleUiHandleText;
     uiVisibilityButton.setAttribute("aria-label", uiHidden ? "Show UI" : "Hide UI");
     scheduleScrollbarTrackAnchorsUpdate(false);
   };

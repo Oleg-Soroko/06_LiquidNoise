@@ -67,7 +67,7 @@ const audioElement = new Audio();
 audioElement.preload = "auto";
 audioElement.crossOrigin = "anonymous";
 audioElement.loop = true;
-const DEFAULT_AUDIO_URL = "/Noise_Default.mp3";
+const DEFAULT_AUDIO_URL = `${import.meta.env.BASE_URL}Noise_Default.mp3`;
 const RECORDING_FPS = 60;
 type FpsLimitMode = "30" | "60" | "unlimited";
 const DEFAULT_FPS_LIMIT_MODE: FpsLimitMode = "60";
@@ -85,6 +85,10 @@ let isRecording = false;
 let fpsLimitMode: FpsLimitMode = DEFAULT_FPS_LIMIT_MODE;
 let fpsLimiterLastTickMs = 0;
 let fpsLimiterAccumulatorMs = 0;
+
+// Preload default track on boot, but keep it paused until user presses Play.
+audioElement.src = DEFAULT_AUDIO_URL;
+audioElement.load();
 
 const getFpsFrameIntervalMs = (mode: FpsLimitMode): number => {
   if (mode === "unlimited") {
@@ -430,7 +434,10 @@ controlPanel.setMicActive(false);
 controlPanel.setRecordEnabled(supportsMediaRecording);
 controlPanel.setRecordState(false);
 controlPanel.setPlayState(false);
-controlPanel.setPlayEnabled(false);
+controlPanel.setPlayEnabled(audioController.hasLoadedFile());
+if (audioController.hasLoadedFile()) {
+  controlPanel.setStatus("Default track ready. Press Play.");
+}
 
 const clock = new Clock();
 let animationFrameId = 0;
