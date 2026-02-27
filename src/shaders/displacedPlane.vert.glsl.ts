@@ -324,7 +324,12 @@ void main() {
   vec2 domainPos = domainRotate * domainScaled;
   vec2 symmetryPos = applySymmetry(domainPos);
   vec3 basePos = vec3(symmetryPos, uDriftPhase) + uBaseOffset;
-  vec3 simplexInput = basePos * max(0.0001, uBaseFreq);
+  // Keep temporal phase scale stable while changing main noise size.
+  // This prevents rapid "scrolling" artifacts when uBaseFreq is dragged.
+  vec3 simplexInput = vec3(
+    basePos.xy * max(0.0001, uBaseFreq),
+    basePos.z * 0.32
+  );
   if (uMouseNoiseOffset > 0.5) {
     float moveLen = length(uMouseMoveDir);
     if (moveLen > 0.0001) {
