@@ -743,10 +743,17 @@ export function createControlPanel(
 
   const tabButtons = {} as Record<TabKey, HTMLButtonElement>;
   const tabPanels = {} as Record<TabKey, HTMLDivElement>;
+  const hiddenTabKeys = new Set<TabKey>(["camera", "ui"]);
 
   const setActiveTab = (activeKey: TabKey): void => {
-    for (const key of Object.keys(tabButtons) as TabKey[]) {
-      const isActive = key === activeKey;
+    const keys = Object.keys(tabButtons) as TabKey[];
+    const visibleKeys = keys.filter((key) => !hiddenTabKeys.has(key));
+    const resolvedActiveKey = visibleKeys.includes(activeKey) ? activeKey : (visibleKeys[0] ?? activeKey);
+    tabsNav.style.gridTemplateColumns = `repeat(${Math.max(1, visibleKeys.length)}, minmax(0, 1fr))`;
+    for (const key of keys) {
+      const isVisible = !hiddenTabKeys.has(key);
+      const isActive = isVisible && key === resolvedActiveKey;
+      tabButtons[key].hidden = !isVisible;
       tabButtons[key].dataset.active = isActive ? "true" : "false";
       tabPanels[key].hidden = !isActive;
     }
