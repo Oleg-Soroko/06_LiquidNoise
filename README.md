@@ -76,3 +76,33 @@ Viewport interaction:
 - Orbit: left mouse drag
 - Pan: right mouse drag
 - Zoom: mouse wheel
+
+## Deployment
+Live demo (GitHub Pages):
+- https://oleg-soroko.github.io/06_LiquidNoise/
+
+Build locally for a static deploy:
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Build with relative asset paths (required for GitHub Pages project pages):
+   ```bash
+   npm run build -- --base ./
+   ```
+3. Preview the production build locally:
+   ```bash
+   npm run preview
+   ```
+
+Deploy to `gh-pages` branch:
+1. Build the project with relative paths:
+   ```bash
+   npm run build -- --base ./
+   ```
+2. Create/update a clean publish branch from `dist/` output (keep static structure like `index.html`, `assets/`, `.nojekyll`, optional `env/.gitkeep`).
+3. Push that static bundle to `gh-pages`:
+   ```bash
+   git push origin gh-pages --force
+   ```
+4. In GitHub repo settings, set Pages source to the `gh-pages` branch.
